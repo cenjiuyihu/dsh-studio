@@ -1,0 +1,28 @@
+{
+  "name": "dsh-studio",
+  "version": "0.1.0",
+  "description": "dsh工作室：把会话提升为成员（别名/颜色/角色/能力标签/锁定/置顶），并在此基础上提供跨会话群聊与资源共享。",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./tools": "./src/tools.js",
+    "./priority": "./src/priority.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "external": [
+        "react",
+        "react/jsx-runtime",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "license": "MIT"
+}

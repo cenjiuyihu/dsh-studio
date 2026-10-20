@@ -1,0 +1,15 @@
+# 统一换行符：仓库内一律 LF，检出时也保持 LF。
+#
+# 为什么需要：本机 git 的 core.autocrlf 默认会把 LF 转成 CRLF 检出，
+# 于是同一份文件在不同机器上会出现"整文件都被改过"的假 diff —— 对**要给别人看的开源仓库**尤其糟：
+# 别人 clone 下来看到的第一个 diff 就是成千上万行换行噪音。
+#
+# 注意：这不是"让代码能在 Windows 跑"的措施（Node 两种换行都能读），
+# 纯粹是**为了让 diff 说人话**。
+* text=auto eol=lf
+
+# 这些是二进制/本地产物，别做任何转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.zstd binary

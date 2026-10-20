@@ -1,0 +1,6 @@
+这段正文故意塞满 Windows 命令行会炸的东西：
+
+{ "task": "fix", "files": ["a.cpp", "b.java"], "note": "把 "check" 补上" }
+pwsh -Command "Get-ChildItem -Filter *.cpp | Select-Object -First 3"
+正则：GROUP_LINE_RE = /^【群聊·([^｜]*)｜([^｜]*)｜来自 ([^】]*)】/
+路径：C:\work\project\data-src\templates\05-data-structures\03-binary-search.cpp

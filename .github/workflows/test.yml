@@ -1,0 +1,66 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 这个包本身没有第三方依赖（React 等由宿主注入），所以不需要 npm install。
+      # 但 node_modules 缺失时 `import` 仍会失败 —— 用 `npm ci` 会在无 lockfile 时报错，
+      # 所以这里只做一次"依赖清单为空"的断言，避免以后有人加了依赖却忘了改 CI。
+      - name: Assert no runtime dependencies
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const p = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+            const deps = Object.keys(p.dependencies ?? {});
+            const peer = Object.keys(p.peerDependencies ?? {});
+            if (deps.length > 0 || peer.length > 0) {
+              console.error('package.json 出现了依赖：' + JSON.stringify({ deps, peer }));
+              console.error('CI 需要改成 npm ci + 生成 lockfile。');
+              process.exit(1);
+            }
+            console.log('无运行时依赖 ✔');
+          "
+
+      # ⚠️ 不要写成 `node --test test/` —— 不同 Node 版本对"目录参数"的处理不一致
+      #    （Node 24 + Windows 会把它当成模块路径，直接 MODULE_NOT_FOUND）。显式列文件最稳。
+      - name: Unit tests (node:test)
+        run: >
+          node --test
+          test/store.test.mjs
+          test/priority.test.mjs
+          test/review.test.mjs
+          test/inbox-verdict.test.mjs
+          test/progress.test.mjs
+
+      - name: Self-contained suites
+        run: |
+          node test/resolve.test.mjs
+          node test/gates.test.mjs
+
+      - name: Static invariants
+        run: |
+          node test/client-invariants.mjs
+          node test/scope-audit.mjs
+
+      - name: Secret scan
+        run: node test/secret-scan.mjs
+
+      - name: Mount preflight
+        run: node test/preflight.mjs

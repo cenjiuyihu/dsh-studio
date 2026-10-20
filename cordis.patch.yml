@@ -1,0 +1,12 @@
+# dsh-studio — 独立安装方式（配置 HMR 实时生效，无需重启主星）
+#
+# 1) 把本包链接进 profile 的 node_modules（改源码即生效，npm 升级不会覆盖）：
+#    Windows:  cmd /c mklink /J "%USERPROFILE%\.dsh\profiles\web\node_modules\dsh-studio" "<本包所在目录>"
+#    macOS/Linux: ln -sfn "<本包所在目录>" "$HOME/.dsh/profiles/web/node_modules/dsh-studio"
+# 2) 把下面的 insert 行并入 $DSH_HOME/profiles/web/cordis.patch.yml
+# 3) 刷新页面（新插件的 boot manifest 是页面加载时注入的）
+#
+# 回滚：删掉 cordis.patch.yml 里那一段，再删掉那个链接（Windows: rmdir / macOS·Linux: rm），然后刷新页面。
+- insert:
+    - id: studio
+      name: dsh-studio
