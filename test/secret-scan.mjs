@@ -11,8 +11,19 @@
 //      没有这一步，"0 命中"就只是"未知"；
 //   ③ **必须报覆盖率** —— 扫了多少文件、多少字节，目标时段内有没有跳过（跳过即未读）。
 //
-// 用法：node test/secret-scan.mjs [--root <目录>]
+// 用法：node test/secret-scan.mjs [--root <目录>] [--self-test-only]
 // 退出码：0 = 干净；1 = 有命中或有跳过（视为不干净）
+//
+// ★ 为什么有 --self-test-only（2026-11-21 实测补的）：
+//   探针来自**本机**凭证表 `$DSH_HOME/dsh-bridge/config.json`。CI（GitHub runner）上没有这个文件，
+//   于是 `probes.length === 0`，而空探针被判为不干净 ⇒ **本仓库 CI 从第一版起就是红的**
+//   （run #1/#2 两个 job 都死在 `Secret scan` 这一步，前面 7 步全 success）。
+//   这个判定本身是对的（空探针什么都证明不了），但它不该被当成"代码坏了"。
+//   所以拆成两个模式：
+//     · 默认（本机出厂检查）：不变 —— 读不到配置就 exit 1，绝不静默放行；
+//     · `--self-test-only`（CI）：探针集**缩成合成对照串本身**，仍然做一次真实的全仓遍历 +
+//       阳性对照，只证明"扫描器能命中"，**不**证明"真值不在"。
+//   打印里必须把这句话说出来 —— 不然"绿了"会被读成"没泄露"。
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -24,6 +35,7 @@ const CONFIG = path.join(DSH_HOME, 'dsh-bridge', 'config.json')
 const argv = process.argv.slice(2)
 const rootIndex = argv.indexOf('--root')
 const ROOT = rootIndex >= 0 && typeof argv[rootIndex + 1] === 'string' ? argv[rootIndex + 1] : process.cwd()
+const SELF_TEST_ONLY = argv.includes('--self-test-only')
 
 /** 收集"必须扫"的值：密钥类（名字像密钥）+ 标识类（appId/accountId/allowFrom[*]）。 */
 const SECRET_KEY_RE = /secret|token|password|passwd|api[_-]?key|private[_-]?key/i
@@ -62,7 +74,8 @@ try {
 //   ② 扫描器扫描**它自己所在的文件**这件事必须**显式说出来**（见下面的"排除项"打印），
 //      绝不静默 —— 排除是一种可能藏东西的操作。
 const CONTROL = ['THIS-IS-A', 'SYNTHETIC-PROBE', 'VALUE-9f3a'].join('-')
-const probes = [...new Set([...secrets, ...identifiers])]
+// 自检模式下探针集只含对照串：遍历照跑、对照照验，但"真值在不在"这个问题本次不回答。
+const probes = SELF_TEST_ONLY ? [CONTROL] : [...new Set([...secrets, ...identifiers])]
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'replies', 'shots', '_scratch', '.studio-data'])
 const SELF = path.join(ROOT, 'test', 'secret-scan.mjs')
@@ -100,7 +113,8 @@ for (const file of files) {
   bytes += Buffer.byteLength(text, 'utf8')
   let count = 0
   for (const probe of probes) if (text.includes(probe)) count += 1
-  if (text.includes(CONTROL)) count += 1
+  // 对照串可能已经在 probes 里（自检模式正是如此），避免同一条被数两次。
+  if (!probes.includes(CONTROL) && text.includes(CONTROL)) count += 1
   if (count > 0) hits.set(path.relative(ROOT, file), count)
 }
 
@@ -109,13 +123,22 @@ const controlDetected = `prefix ${CONTROL} suffix`.includes(CONTROL)
 
 console.log(`出厂检查 · 按【值】扫描`)
 console.log(`根目录：${ROOT}`)
+console.log(`模式：${SELF_TEST_ONLY ? '自检（--self-test-only）' : '完整（本机凭证表作探针）'}`)
 console.log(`${configNote}`)
 console.log(`探针：密钥类 ${secrets.length} 条 · 标识类 ${identifiers.length} 条（**值一律不打印**）`)
 console.log(`覆盖：扫了 ${files.length} 个文件 / ${bytes} 字节；读不出而跳过的 ${skipped} 个`)
 console.log(`排除项（**显式列出，不静默**）：`)
 for (const item of excluded) console.log(`   · ${item}`)
 console.log(`阳性对照：${controlDetected ? '✅ 检测逻辑能命中构造样本' : '❌ 检测逻辑失效 ⇒ 本次"0 命中"不成立'}`)
-if (secrets.length === 0 && identifiers.length === 0) {
+if (SELF_TEST_ONLY) {
+  console.log(
+    `⚠️ 自检模式：本次**只**证明"扫描器本身能命中、没有把对照串写进仓库"，` +
+      `**不能**证明真实凭证不在（真值没参与比对）。要回答那个问题，请在没有 --self-test-only 的本机跑一次。`,
+  )
+  if (secrets.length + identifiers.length > 0) {
+    console.log(`   注意：本机其实读到了 ${secrets.length + identifiers.length} 条探针，但被 --self-test-only 忽略了 —— 这个参数只该在 CI 用。`)
+  }
+} else if (secrets.length === 0 && identifiers.length === 0) {
   console.log(`⚠️ 探针为空（配置里没读到敏感值）⇒ 本次扫描**只**验证了"没有合成样本"，不能证明真值不在。`)
 }
 
@@ -127,5 +150,9 @@ if (hits.size === 0) {
   console.log(`   ⚠️ 只给文件名与条数，**不给值**；请自行打开核对并清除。`)
 }
 
-const bad = hits.size > 0 || skipped > 0 || !controlDetected || probes.length === 0
+// 空探针 = 一条值都没比对 ⇒ 一律判为不干净。这条纪律**只**对默认模式生效：
+// --self-test-only 模式下探针至少含对照串，不会走进这个分支（也不会掩盖真实命中）。
+const vacuous = !SELF_TEST_ONLY && probes.length === 0
+if (vacuous) console.log(`\n❌ 探针为空：本次没有比对任何真实值 ⇒ 按"不干净"处理（这是本机出厂检查的默认纪律）。`)
+const bad = hits.size > 0 || skipped > 0 || !controlDetected || vacuous
 process.exit(bad ? 1 : 0)

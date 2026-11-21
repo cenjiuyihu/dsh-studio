@@ -1,6 +1,6 @@
 {
   "name": "dsh-studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "dsh工作室：把会话提升为成员（别名/颜色/角色/能力标签/锁定/置顶），并在此基础上提供跨会话群聊与资源共享。",
   "type": "module",
   "main": "src/index.js",

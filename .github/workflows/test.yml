@@ -53,14 +53,22 @@ jobs:
         run: |
           node test/resolve.test.mjs
           node test/gates.test.mjs
+          node test/color-and-tint.test.mjs
 
       - name: Static invariants
         run: |
           node test/client-invariants.mjs
           node test/scope-audit.mjs
 
-      - name: Secret scan
-        run: node test/secret-scan.mjs
+      # ⚠️ 这里必须是 --self-test-only：runner 上没有本机凭证表（$DSH_HOME/dsh-bridge/config.json），
+      #    完整模式的探针会是空集，而空探针被判为"不干净" ⇒ 这一步会永久红。
+      #    自检模式仍然遍历全仓 + 跑阳性对照，但**不**证明"真值不在"——那句话是打印出来的，不是默认假设。
+      #    本机出厂检查请用不带参数的 `node test/secret-scan.mjs`。
+      - name: Secret scan (self-test only — 真值比对只在装了 DSH 的机器上做)
+        run: node test/secret-scan.mjs --self-test-only
 
-      - name: Mount preflight
-        run: node test/preflight.mjs
+      # ⚠️ `test/preflight.mjs` **故意不在这里跑**，它是本机重启前自检：
+      #    读 $DSH_HOME/profiles/web/cordis.patch.yml、连 http://127.0.0.1:3080 上的活宿主、
+      #    解析 $DSH_HOME/studio/studio.json —— runner 上三样都不存在，跑必挂。
+      #    它既要在重启之前跑（那时候已经付出一次重启代价之前），也就只对"这台机器"有意义。
+

@@ -16,14 +16,16 @@
   "use strict";
 
   const PLUGIN_ID = "dsh-studio";
-  const VERSION = "0.1.0";
+  const VERSION = "0.2.0";
   const API = "/api/dsh-studio";
   const UI_KEY = "dsh.studio.ui";
   const VIEW_KEY = "dsh.workspace.view.v5";
   const STATUS_KEY = "__DSH_STUDIO__";
   const PREFIX = "[dsh-studio]";
 
-  /** 成员颜色标签色板：只存 key，渲染时映射成具体颜色。 */
+  /** 成员颜色标签色板：只存 key，渲染时映射成具体颜色。
+   *  ⚠️ 前 8 个 key 是历史值，**不要改名**（成员记录里存的就是 key）；新增的往后追加。
+   *  2026-10-25：成员变多后 8 色不够分（7 位活成员 + 退役记录），扩到 16 个；并支持自定义 `#rrggbb`。 */
   const PALETTE = [
     { key: "slate", label: "石墨", color: "#8a8f98" },
     { key: "blue", label: "靛蓝", color: "#4c8dff" },
@@ -33,8 +35,30 @@
     { key: "violet", label: "紫罗兰", color: "#a371f7" },
     { key: "cyan", label: "青碧", color: "#39c5cf" },
     { key: "orange", label: "橘", color: "#f0883e" },
+    { key: "teal", label: "青瓷", color: "#2dd4bf" },
+    { key: "lime", label: "柠檬", color: "#a3e635" },
+    { key: "sky", label: "天青", color: "#38bdf8" },
+    { key: "indigo", label: "靛青", color: "#6366f1" },
+    { key: "fuchsia", label: "品红", color: "#e879f9" },
+    { key: "pink", label: "樱粉", color: "#f472b6" },
+    { key: "sand", label: "沙金", color: "#c8b273" },
+    { key: "steel", label: "钢青", color: "#5b8fb9" },
   ];
   const COLOR_OF = Object.fromEntries(PALETTE.map((entry) => [entry.key, entry.color]));
+  /** 自定义颜色的合法形态（支持 #rgb / #rgba / #rrggbb / #rrggbbaa）。 */
+  const HEX_RE = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+  /**
+   * 成员颜色解析器：**预设 key 与自定义 `#rrggbb` 走同一个入口**。
+   * 之前各处直接 `COLOR_OF[member.color]`，一旦存的是自定义色就全变成兜底色（静默错标）；
+   * 现在未知值一律回落到石墨色，且只有这一处做回落。
+   */
+  function resolveMemberColor(value) {
+    if (typeof value !== "string") return PALETTE[0].color;
+    const raw = value.trim();
+    if (COLOR_OF[raw] !== undefined) return COLOR_OF[raw];
+    if (HEX_RE.test(raw)) return raw;
+    return PALETTE[0].color;
+  }
 
   // 只用 56 个真实存在的主题变量（从 shipped CSS 里提取出来的清单）。
   const C = {
@@ -102,6 +126,12 @@
       isolateGroupTurns: true,
       // 回执状态点（📨 已送达 / 📝 已回执 / ✅ 已交付）默认开：它只是一个视觉标记，不发任何消息。
       showReceipts: true,
+      // ★ 单聊层身份底色（2026-11-02 用户口径）：把「当前会话属于哪位成员」的颜色染到
+      //   **会话区 / 输入框 / 侧栏当前行** 三处，解决"会话背景都一样、找错会话"。
+      //   用户明确只要单聊层：群聊侧已有左右边框作为标识，不必再加。
+      tintSession: true,
+      // 底色强度（百分比，叠一层 alpha；6~14 之间肉眼可分且不刺眼）
+      tintStrength: 14,
       // 0 = 自动（按窗口自适应）；>0 = 用户拖右边框定过的宽度（会记住）
       dockWidth: 0,
     };
@@ -117,6 +147,8 @@
         hideInSession: parsed.hideInSession !== false,
         isolateGroupTurns: parsed.isolateGroupTurns !== false,
         showReceipts: parsed.showReceipts !== false,
+        tintSession: parsed.tintSession !== false,
+        tintStrength: Number.isFinite(Number(parsed.tintStrength)) ? Math.min(30, Math.max(0, Number(parsed.tintStrength))) : 14,
         dockWidth: Number.isFinite(Number(parsed.dockWidth)) && Number(parsed.dockWidth) > 0 ? Number(parsed.dockWidth) : 0,
       };
     } catch {
@@ -136,6 +168,8 @@
           hideInSession: state.hideInSession !== false,
           isolateGroupTurns: state.isolateGroupTurns !== false,
           showReceipts: state.showReceipts !== false,
+          tintSession: state.tintSession !== false,
+          tintStrength: Number.isFinite(Number(state.tintStrength)) ? Math.min(30, Math.max(0, Number(state.tintStrength))) : 14,
           dockWidth: Number.isFinite(Number(state.dockWidth)) ? Number(state.dockWidth) : 0,
         }),
       );
@@ -294,6 +328,111 @@
   /** 可核对的读数：已标注的行数 / 没解析出的行数（写在 html 上）。 */
   const ANCHORS_ATTR = "data-dsh-studio-anchors";
   const UNRESOLVED_ATTR = "data-dsh-studio-unresolved";
+  /** 代理行（2026-10-25）：收起态预览窗口之外的成员，用克隆行补出来，见 syncMemberProxies 的说明。 */
+  const PROXY_ATTR = "data-dsh-studio-proxy";
+  /** 代理行条数（html 属性，可被外部核对；为 0 时也会写 0，不隐藏失效）。 */
+  const PROXIES_ATTR = "data-dsh-studio-proxies";
+  /** ★ 单聊层身份底色（2026-11-02）：开关状态写在 html 上，CSS 三条规则全部以它为前置条件。 */
+  const TINT_ATTR = "data-dsh-studio-tint";
+  /** 侧栏"当前会话"那一行（与底色同源；即便底色关掉也标，用于"我在哪一条"）。 */
+  const ACTIVE_ATTR = "data-dsh-studio-active";
+
+  /** hex → "r, g, b"；解析不出来返回 null。支持 #rgb / #rrggbb。 */
+  function rgbTriplet(hex) {
+    const raw = String(hex ?? "").trim().replace(/^#/, "");
+    const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+    if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+    const n = parseInt(full, 16);
+    return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+  }
+
+  /** 把颜色按 alpha 做成可直接给 `linear-gradient` 用的 rgba()。 */
+  function tintRgba(hex, alpha) {
+    const trip = rgbTriplet(hex);
+    return trip === null ? "transparent" : `rgba(${trip}, ${Number(alpha.toFixed(3))})`;
+  }
+
+  /** 侧栏收起/展开切换时，"当前选中行"可能短暂消失 —— 记住上一次的身份，避免底色闪一下没。 */
+  let lastTintSessionId = null;
+
+  /**
+   * 从**会话视图**里读"当前打开的是哪个会话"。
+   *
+   * 为什么不能只靠侧栏选中行（`aria-selected`）：成员行若落在收起态预览窗口外，用户是通过
+   * **代理行**点进来的，而代理行是克隆出来的死 DOM，外壳不会给它打 aria-selected
+   * ⇒ 只看侧栏就会判定"没有当前会话"，底色永远不亮（2026-11-02 实测踩到）。
+   *
+   * 实测：`[data-conversation-scroll]` 往上第 2 层 fiber 的 `props.sessionId` 就是答案
+   * （组件 `ConversationRoot`）。取不到就返回 null，由调用方退回侧栏/上次值。
+   */
+  function activeSessionIdOfConversation() {
+    try {
+      const conv = document.querySelector("[data-conversation-scroll]") ?? document.querySelector("[data-chat-flow]");
+      if (conv === null) return null;
+      const key = Object.keys(conv).find(
+        (name) => name.startsWith("__reactFiber$") || name.startsWith("__reactInternalInstance$"),
+      );
+      let node = key === undefined ? undefined : conv[key];
+      let depth = 0;
+      while (node !== undefined && node !== null && depth < 60) {
+        const props = node.memoizedProps;
+        if (props !== null && typeof props === "object" && typeof props.sessionId === "string" && SESSION_ID_RE.test(props.sessionId)) {
+          return props.sessionId;
+        }
+        node = node.return;
+        depth += 1;
+      }
+    } catch {
+      /* fiber 形状变了就退回别的路径 */
+    }
+    return null;
+  }
+
+  /**
+   * ⭐ 单聊层身份底色（2026-11-02，用户口径）。
+   *
+   * 解决什么：**会话区背景全都一样，找错会话**。做法是把"当前会话属于哪位成员"的色板颜色，
+   * 以一层很淡的 alpha 叠到三处：会话区、输入框、侧栏当前行（左竖条）。
+   *
+   * 四条边界：
+   *   ① **只做单聊层**：群聊消息那侧已有左右边框标识，用户明确说不用再加 ⇒ 这里不碰任何消息节点；
+   *   ② **非成员会话不上色**（`off`）——绝大多数会话本来没有身份色，不该平白多一层色；
+   *   ③ **退役记录不算身份**（`旧[…]` 仍是成员记录，但它的会话不该被当成"谁的会话"）；
+   *   ④ 只写 3 个 CSS 变量 + 1 个 html 属性，「关」就是把这些撤掉 —— 不留残余样式。
+   *
+   * @returns {{on: boolean, reason?: string, alias?: string, color?: string, strength?: number}}
+   */
+  function applySessionTint(members, activeId, prefs) {
+    const root = document.documentElement;
+    const on = prefs.tintSession !== false;
+    const rawStrength = Number(prefs.tintStrength);
+    const strength = Number.isFinite(rawStrength) ? Math.min(30, Math.max(0, rawStrength)) : 14;
+
+    // 侧栏"当前行"标记：无论有没有颜色都标一次（底色关了也保留，用作"我在哪一条"）
+    for (const el of [...document.querySelectorAll(`[${ROW_ATTR}][${ACTIVE_ATTR}]`)]) el.removeAttribute(ACTIVE_ATTR);
+    const activeEl =
+      activeId === null || activeId === undefined ? null : document.querySelector(`[${ROW_ATTR}="${activeId}"]`);
+    if (activeEl !== null) activeEl.setAttribute(ACTIVE_ATTR, "1");
+
+    const member =
+      activeId === null || activeId === undefined || !Array.isArray(members)
+        ? undefined
+        : members.find((m) => m !== null && typeof m === "object" && m.sessionId === activeId && !isRetiredMember(m));
+
+    if (!on || member === undefined) {
+      root.style.removeProperty("--dsh-studio-tint-strong");
+      root.style.removeProperty("--dsh-studio-tint-soft");
+      root.style.removeProperty("--dsh-studio-tint-border");
+      root.setAttribute(TINT_ATTR, "off");
+      return { on: false, reason: !on ? "pref-off" : "not-member" };
+    }
+    const color = resolveMemberColor(member.color);
+    root.style.setProperty("--dsh-studio-tint-strong", tintRgba(color, strength / 100));
+    root.style.setProperty("--dsh-studio-tint-soft", tintRgba(color, strength / 200));
+    root.style.setProperty("--dsh-studio-tint-border", tintRgba(color, Math.min(0.85, (strength / 100) * 5)));
+    root.setAttribute(TINT_ATTR, "on");
+    return { on: true, alias: String(member.alias ?? ""), color, strength };
+  }
   /**
    * 成员行在侧栏里的排序基准（2026-10-11 用户口径）。
    *
@@ -352,8 +491,7 @@
    */
   const SESSION_ID_RE = /session-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 
-  function sessionIdOfRow(element) {
-    // ① fiber
+  function sessionIdOfRow(element) {    // ① fiber
     try {
       const key = Object.keys(element).find(
         (name) => name.startsWith("__reactFiber$") || name.startsWith("__reactInternalInstance$"),
@@ -407,6 +545,119 @@
     return undefined;
   }
 
+  /**
+   * 从 React fiber 里取「打开会话」的能力（`SessionTree` 组件的 `props.open`）。
+   *
+   * 为什么需要它：收起态的侧边栏只渲染列表**前 N 条**（外壳的预览窗口）。排在窗口外的成员
+   * 根本没有对应的 DOM 行，`order` 标注无处可打 —— 用户看到的就是"置顶只显示了 4 个"。
+   * 补一行克隆行容易，但克隆出来的 DOM **没有 React 事件处理器**（cloneNode 不复制 fiber），
+   * 所以点击必须走组件自己的 `open(sessionId)`。
+   *
+   * 只在**真正需要时**才走 fiber：找不到就返回上次缓存（外壳换实现时最坏退化成"点了没反应"，
+   * 不会把侧栏搞坏）。判据用 `open` + `setSessionOrder` 同时存在 —— 只认 `open` 容易撞名。
+   */
+  let cachedOpenSession = null;
+  /** 见过的会话标题（按 sessionId）。代理行用它，使"置顶行"与真实行显示同一个标题。 */
+  const rememberedTitles = new Map();
+  function openSessionOf() {
+    try {
+      for (const row of document.querySelectorAll('[role="treeitem"]')) {
+        if (!String(row.className).includes("sessionRow")) continue;
+        const key = Object.keys(row).find(
+          (name) => name.startsWith("__reactFiber$") || name.startsWith("__reactInternalInstance$"),
+        );
+        let node = key === undefined ? undefined : row[key];
+        let depth = 0;
+        while (node !== undefined && node !== null && depth < 30) {
+          const props = node.memoizedProps;
+          if (
+            props !== null &&
+            typeof props === "object" &&
+            typeof props.open === "function" &&
+            typeof props.setSessionOrder === "function"
+          ) {
+            cachedOpenSession = props.open;
+            return cachedOpenSession;
+          }
+          node = node.return;
+          depth += 1;
+        }
+      }
+    } catch {
+      /* fiber 形状变了：退化为"点了没反应"，不抛 */
+    }
+    return cachedOpenSession;
+  }
+
+  /**
+   * 为「活成员里、行不在 DOM 中」的那些补一行**代理行**（2026-10-25）。
+   *
+   * 三条边界：
+   *   ① 只在"侧边栏置顶"开着时补；关掉就全部撤掉；
+   *   ② **真实行一出现就撤代理**（用户展开其余会话后，代理自动消失，不会出现双份）；
+   *   ③ 代理行带 `PROXY_ATTR`，并且标注循环会跳过它 —— 否则它会污染 anchors 计数、
+   *      也会在下一帧被当成真实行再标一遍。
+   *
+   * @returns {number} 本次补充/保留的代理行数（写进 html 属性，可被外部核对）
+   */
+  function syncMemberProxies(members, retiredIds, memberRank) {
+    const wanted = members
+      .filter((member) => member !== null && typeof member === "object" && !retiredIds.has(member.sessionId))
+      .sort((a, b) => (memberRank.get(a.sessionId) ?? 0) - (memberRank.get(b.sessionId) ?? 0));
+    const presentIds = new Set(
+      [...document.querySelectorAll(`[${ROW_ATTR}]`)]
+        .filter((el) => !el.hasAttribute(PROXY_ATTR))
+        .map((el) => el.getAttribute(ROW_ATTR))
+        .filter((id) => typeof id === "string" && id.length > 0),
+    );
+    const missing = wanted.filter((member) => !presentIds.has(member.sessionId));
+
+    // 撤掉"已经不缺"的代理（展开后真实行出现、或成员被移除）
+    const missingIds = new Set(missing.map((member) => member.sessionId));
+    for (const proxy of [...document.querySelectorAll(`[${PROXY_ATTR}]`)]) {
+      const id = proxy.getAttribute(PROXY_ATTR);
+      if (!missingIds.has(id)) proxy.remove();
+    }
+    if (missing.length === 0) return 0;
+
+    const template = document.querySelector(`[${ROW_ATTR}]:not([${PROXY_ATTR}])`);
+    const container = template !== null ? template.parentElement : null;
+    if (template === null || container === null) return 0;
+    const open = openSessionOf();
+    let made = 0;
+    for (const member of missing) {
+      if (document.querySelector(`[${PROXY_ATTR}="${member.sessionId}"]`) !== null) continue;
+      const clone = template.cloneNode(true);
+      clone.removeAttribute(MISS_ATTR);
+      clone.setAttribute(PROXY_ATTR, member.sessionId);
+      // 保留 ROW_ATTR：配色 CSS 是按 `[ROW_ATTR="<id>"]` 给 `--dsh-studio-member-color` 的
+      clone.setAttribute(ROW_ATTR, member.sessionId);
+      clone.style.order = String(MEMBER_ORDER_BASE + (memberRank.get(member.sessionId) ?? 0));
+      const inner = clone.querySelector('[role="treeitem"]');
+      if (inner !== null) {
+        inner.setAttribute("aria-selected", "false");
+        const kids = [...inner.children];
+        // 结构：slot / 标题 / 时间 / 操作区（外壳的 hashed 类名会变，按**位置**取更稳）
+        if (kids[1] !== undefined) {
+          // 有见过的会话标题就用标题（与真实行一致），否则退回落成员别名。
+          const remembered = rememberedTitles.get(member.sessionId);
+          kids[1].textContent = remembered !== undefined ? remembered : String(member.alias ?? "") || "（未命名成员）";
+        }
+        if (kids[2] !== undefined) kids[2].textContent = "置顶";
+        if (kids[3] !== undefined) kids[3].remove(); // 操作菜单是死的，删掉免得误导
+        inner.setAttribute("title", `${member.alias ?? member.sessionId} · 置顶成员会话（点开切换）`);
+        inner.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const opener = open !== null ? open : openSessionOf();
+          if (typeof opener === "function") opener(member.sessionId);
+        });
+      }
+      container.appendChild(clone);
+      made += 1;
+    }
+    return [...document.querySelectorAll(`[${PROXY_ATTR}]`)].length;
+  }
   /** 框架的四个 DOM 子节点（结构定位，不依赖 hashed 类名）。 */
   function frameParts() {
     const layer = document.querySelector("[data-shell-overlay]");
@@ -472,6 +723,17 @@
         `[${SEP_ATTR}]{order:-1;flex:none;height:1px;margin:6px 10px;background:var(--dsw-alias-border-l2);}`,
       );
     }
+    // ★ 单聊层身份底色（2026-11-02 用户口径：会话背景一样、找错会话）。
+    //   前置条件 `html[data-dsh-studio-tint="on"]` ⇒ 关掉（或当前会话不是成员）时三条规则**整体不匹配**，
+    //   完全回到原样，不留残余。只用 data-* 锚点（[data-conversation-scroll] / [data-composer-card]），
+    //   不碰外壳的 hashed 类名；也不碰任何消息节点（群聊侧已有左右边框，用户明确不加）。
+    if (prefs.tintSession !== false) {
+      lines.push(
+        `html[${TINT_ATTR}="on"] [data-conversation-scroll]{background-image:linear-gradient(var(--dsh-studio-tint-strong),var(--dsh-studio-tint-strong));}`,
+        `html[${TINT_ATTR}="on"] [data-composer-card]{background-image:linear-gradient(var(--dsh-studio-tint-soft),var(--dsh-studio-tint-soft));border-color:var(--dsh-studio-tint-border);}`,
+        `[${ROW_ATTR}][${ACTIVE_ATTR}="1"] > [role="treeitem"]{box-shadow:inset 3px 0 0 0 var(--dsh-studio-member-color,#8a8f98);}`,
+      );
+    }
     return lines.filter((line) => line.length > 0).join("\n");
   }
 
@@ -519,6 +781,73 @@
     if (member === null || member === undefined) return false;
     if (member.locked === false) return true;
     return RETIRED_ALIAS_RE.test(String(member.alias ?? ""));
+  }
+
+  /**
+   * 从监督者写出的 `inherit-status.json` 里取某成员的档位（**只读展示**）。
+   * 阈值与白名单的真值在 `binary-star/config.default.json` 的 `inherit.alert`，
+   * 前端**不重复定义** —— 这里只负责显示。
+   */
+  function inheritOf(status, sessionId) {
+    if (status === null || status === undefined) return undefined;
+    const list = Array.isArray(status.members) ? status.members : [];
+    return list.find((entry) => entry.sessionId === sessionId);
+  }
+
+  /** 档位 → 颜色（silent 不显眼，warn/strong 黄，schedule 红）。 */
+  function inheritTierColor(tier) {
+    if (tier === "schedule") return C.error;
+    if (tier === "strong" || tier === "warn") return C.warn;
+    return C.label3;
+  }
+
+  /**
+   * 已提醒过的档位（按会话记在 localStorage 里）。
+   *
+   * 为什么不落盘到监督者：用户口径（2026-10-21）是「**重启后重新提醒一次是合适的**」——
+   * 不持久化反而避免了"状态腐化"与"重启后该响的不响"。
+   * 语义：记的是**已达到的最高档位**；只有**超过**它才再提醒，回落后重置。
+   */
+  const INHERIT_REMIND_KEY = "dsh.studio.inherit.reminded.v1";
+  const INHERIT_TIER_RANK = { silent: 0, warn: 1, strong: 2, schedule: 3 };
+  function readInheritReminded() {
+    try {
+      const raw = window.localStorage.getItem(INHERIT_REMIND_KEY);
+      const parsed = raw === null ? {} : JSON.parse(raw);
+      return parsed !== null && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  function writeInheritReminded(value) {
+    try {
+      window.localStorage.setItem(INHERIT_REMIND_KEY, JSON.stringify(value));
+    } catch {
+      /* 隐私模式/配额满都会抛，提醒只是锦上添花，失败不报错 */
+    }
+  }
+
+  /**
+   * 「取消报警」开关（P3）。
+   *
+   * 语义（计划书 §6）：静音后**三档提醒全停**，继承只剩手动按钮。
+   * 除了记在本地，还会写 `control/inherit-alerts.json` —— 那是**给监督者看的**，
+   * 将来自动排期（P5）也要尊重它。客户端自己读本地那份，避免多一次往返。
+   */
+  const INHERIT_MUTE_KEY = "dsh.studio.inherit.muted.v1";
+  function readInheritMuted() {
+    try {
+      return window.localStorage.getItem(INHERIT_MUTE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function writeInheritMuted(muted) {
+    try {
+      window.localStorage.setItem(INHERIT_MUTE_KEY, muted ? "1" : "0");
+    } catch {
+      /* 同上，失败不阻断 */
+    }
   }
 
   function memberLabel(member, summary) {
@@ -643,7 +972,7 @@
     const labelOfSession = new Map();
     for (const member of members) {
       const label = timelineAuthor(member);
-      const color = COLOR_OF[member.color];
+      const color = resolveMemberColor(member.color);
       labelOfSession.set(member.sessionId, label);
       if (label.length > 0 && color !== undefined) colorOfLabel.set(label, color);
     }
@@ -946,14 +1275,18 @@
     }
 
     function ColorPicker(props) {
+      const picked = typeof props.value === "string" ? props.value.trim() : "";
+      const isCustom = HEX_RE.test(picked) && COLOR_OF[picked.toLowerCase()] === undefined;
+      const [hex, setHex] = React.useState(isCustom ? picked : "");
+      const fallbackHex = isCustom ? picked : HEX_RE.test(hex.trim()) ? hex.trim() : "#4c8dff";
       return React.createElement(
         "div",
-        { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
+        { style: { display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" } },
         PALETTE.map((entry) =>
           React.createElement("button", {
             key: entry.key,
             type: "button",
-            title: entry.label,
+            title: `${entry.label}（${entry.color}）`,
             onClick: () => props.onPick(entry.key),
             style: {
               width: 18,
@@ -961,9 +1294,44 @@
               borderRadius: 9,
               cursor: "pointer",
               background: entry.color,
-              border: props.value === entry.key ? `2px solid ${C.label}` : `1px solid ${C.border}`,
+              border: picked === entry.key ? `2px solid ${C.label}` : `1px solid ${C.border}`,
             },
           }),
+        ),
+        // ★ 自定义颜色（2026-10-25）：原生取色器 + 十六进制输入，二者写同一个 color 字段。
+        //   预设仍存 key（历史兼容），自定义存 `#rrggbb` —— 解析统一走 resolveMemberColor()。
+        React.createElement(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 6, width: "100%", marginTop: 6 } },
+          React.createElement("input", {
+            type: "color",
+            value: fallbackHex.length === 9 ? fallbackHex.slice(0, 7) : fallbackHex,
+            title: "自定义颜色（点开取色器）",
+            onChange: (event) => {
+              setHex(event.target.value);
+              props.onPick(event.target.value);
+            },
+            style: {
+              width: 30,
+              height: 22,
+              padding: 0,
+              border: `1px solid ${isCustom ? C.ok : C.border}`,
+              borderRadius: 4,
+              background: "transparent",
+              cursor: "pointer",
+            },
+          }),
+          React.createElement("input", {
+            value: hex,
+            placeholder: "#rrggbb 自定义",
+            onChange: (event) => {
+              const next = event.target.value;
+              setHex(next);
+              if (HEX_RE.test(next.trim())) props.onPick(next.trim());
+            },
+            style: { ...styles.input, width: 116, marginTop: 0 },
+          }),
+          isCustom ? React.createElement("span", { style: { ...styles.small, color: C.ok } }, `自定义 ${picked}`) : null,
         ),
       );
     }
@@ -1020,9 +1388,63 @@
 
 
       function MemberRow(props) {
-      const { member, summary, onToggleLock, onTogglePin, onEdit, onRemove, onSyncSidebar, syncHint, busy, activity, queue } = props;
-      const color = COLOR_OF[member.color] ?? C.label3;
+      const { member, summary, onToggleLock, onTogglePin, onEdit, onRemove, onSyncSidebar, syncHint, busy, activity, queue, inherit, onHandover } = props;
+      const color = resolveMemberColor(member.color);
       const running = summary !== undefined && summary.running === true;
+      /**
+       * 交接按钮的**三态**（P2）：
+       *   ok      = 会话空闲、未退役/冷存 ⇒ 现在就能交接
+       *   waiting = 会话正在跑 ⇒ 点了会**等它空闲**（监督者有 15 分钟等待上限）
+       *   blocked = 已退役或已冷存 ⇒ 交接对它没有意义
+       *
+       * ⚠️ 注意：**子代理是否在跑**这里看不到（客户端拿不到子代理清单）。
+       *    监督者会把"子代理仍在跑"当成第二个安全点、同样等待 15 分钟。
+       *    所以 `waiting` 的真实含义是"现在点下去可能要等"，不是"一定能立刻执行"。
+       */
+      const handoverState = inherit === undefined
+        ? running ? "waiting" : "ok"
+        : inherit.cold === true || inherit.retired === true
+          ? "blocked"
+          : running ? "waiting" : "ok";
+      const handoverTitle =
+        handoverState === "blocked"
+          ? "已退役/已冷存的会话不参与交接（它本身就曾经是交接的另一端）"
+          : handoverState === "waiting"
+            ? "会话正在运行。点下去会写请求，监督者会等它**空闲之后**才执行（上限 15 分钟）"
+            : "现在交接：写 control/inherit-request.json，监督者下一步就接手（会建新会话并把身份移过去）";
+      // ── 会话大小的阈值档位（P1，**只读展示**；真值来自监督者的 inherit-status.json）──
+      //   冷存 = 会话已被移出 sessions 根目录（成员记录仍在，但不可投递）。
+      const inheritChip =
+        inherit === undefined
+          ? null
+          : inherit.cold === true
+            ? React.createElement(
+                "span",
+                { style: { ...styles.chip, opacity: 0.65 }, title: "该会话已冷存到 sessions-archive（移出 sessions 根）。成员记录保留以便历史寻址，但**不可投递**。恢复用该批次的 restore.mjs。" },
+                "已冷存",
+              )
+            : inherit.percent === null || inherit.percent === undefined
+              ? null
+              : React.createElement(
+                  "span",
+                  {
+                    style: { ...styles.chip, color: inheritTierColor(inherit.tier) },
+                    title:
+                      `会话 ${inherit.events} 事件（占阈值 ${Math.round(inherit.percent)}%）` +
+                      (inherit.eventsSource === "bytes-estimate" ? " · 按体积估算，精确值要等下一次整点采样" : " · 精确读数") +
+                      (inherit.remainingHours !== null && inherit.remainingHours !== undefined
+                        ? ` · 按当前速度还有 ${inherit.remainingHours} 小时到 100%`
+                        : inherit.events !== null && inherit.tier === "silent"
+                          ? " · 增速接近 0，暂时不会自己涨满"
+                          : "") +
+                      (inherit.whitelisted ? " · 白名单：只提醒、不自动排期" : "") +
+                      (inherit.retired ? " · 已退役（不参与告警）" : ""),
+                  },
+                  // ⚠️ 体积估算会**高估**事件数（工具负载大的会话，字节/事件比偏高）：
+                  //    实测同一会话 exact 67% vs estimate 74% —— 足以翻转 70% 档位。
+                  //    估算值一律加 `≈`，别让人把 74% 当准数。
+                  `${inherit.eventsSource === "bytes-estimate" ? "≈" : ""}${Math.round(inherit.percent)}%`,
+                );
       return React.createElement(
         "div",
         { style: styles.card },
@@ -1035,6 +1457,7 @@
             { style: { fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
             memberLabel(member, summary),
           ),
+          inheritChip,
           running ? React.createElement("span", { style: { ...styles.chip, color: C.ok } }, "运行中") : null,
           // 排队深度：每条排队消息都要吃掉对方一个完整回合 —— 堆起来就是"发得太快、处理不过来"。
           queue !== undefined && queue.queued > 0
@@ -1060,6 +1483,17 @@
             Button,
             { title: "在工作室面板内置顶", disabled: busy, onClick: () => onTogglePin(!member.pinned) },
             member.pinned ? "已置顶" : "置顶",
+          ),
+          React.createElement(
+            Button,
+            {
+              title: handoverTitle,
+              // P3：≥100% 的成员把交接按钮转红（常驻视觉压力），其余保持警示黄
+              tone: inherit !== undefined && inherit.tier === "schedule" ? "danger" : handoverState === "ok" ? "warn" : undefined,
+              disabled: busy || handoverState === "blocked" || onHandover === undefined,
+              onClick: () => onHandover !== undefined && onHandover(member.sessionId),
+            },
+            handoverState === "blocked" ? "不可交接" : handoverState === "waiting" ? "交接·等空闲" : "交接",
           ),
           React.createElement(Button, { icon: Icon.Edit, title: "编辑别名 / 颜色 / 角色 / 能力", disabled: busy, onClick: onEdit }),
           React.createElement(Button, { icon: Icon.Trash, title: "从工作室移除（不动会话本身）", tone: "danger", disabled: busy, onClick: onRemove }),
@@ -1110,6 +1544,41 @@
       }, []);
       const activityOf = (sessionId) => describeActivity(activityBySession.get(sessionId), Date.now(), ACTIVITY_WINDOW_MS);
       void activityTick;
+      // ── 70% 弱提醒（P2）：每个会话**只提醒一次**，回落到 70% 以下后重置 ──
+      //    判据来自监督者写出的 inherit-status（只读）；已提醒到哪一档记在 localStorage。
+      //    这一阶段只处理 warn（70%）；90% 的"每次会话提醒"与 100% 的常驻标记在 P3。
+      const [inheritMuted, setInheritMuted] = React.useState(() => readInheritMuted());
+      React.useEffect(() => {
+        if (inheritMuted) return; // 静音优先：P3 的「取消报警」要能压住这一档
+        const status = state.inheritStatus;
+        if (status === null || status === undefined || Array.isArray(status.members) === false) return;
+        const reminded = readInheritReminded();
+        let changed = false;
+        const fresh = [];
+        for (const m of status.members) {
+          if (m === null || m === undefined || typeof m.sessionId !== "string") continue;
+          const rank = INHERIT_TIER_RANK[m.tier] ?? 0;
+          const prevRank = typeof reminded[m.sessionId] === "number" ? reminded[m.sessionId] : 0;
+          if (rank !== prevRank) {
+            reminded[m.sessionId] = rank;
+            changed = true;
+          }
+          if (rank === 1 && prevRank < 1) fresh.push(m);
+        }
+        if (changed) writeInheritReminded(reminded);
+        if (fresh.length > 0) {
+          const detail = fresh
+            .map(
+              (m) =>
+                `${m.alias} ${m.percent}%` +
+                (m.remainingHours !== null && m.remainingHours !== undefined ? `（按当前速度还有约 ${m.remainingHours} 小时）` : ""),
+            )
+            .join("、");
+          setLocalNotice(
+            `⚠️ 会话规模已达阈值的 70%：${detail}。可以现在点「交接」，也可以等它更满再处理 —— 这一档只提醒这一次。`,
+          );
+        }
+      }, [state.inheritStatus, inheritMuted]);
       // WorkspaceListState 的字段名是 `items`（见 ui-workspace 里 `useWorkspaces((state) => state.items)`）。
       const workspaceItems =
         workspaceState !== undefined && Array.isArray(workspaceState.items)
@@ -1149,6 +1618,12 @@
         writeUiPrefs({ ...store.get(), [key]: next });
       };
 
+      /** 数值型偏好（目前只有底色强度）：写 store + 落 localStorage。 */
+      const setPref = (key, value) => {
+        store.set({ [key]: value });
+        writeUiPrefs({ ...store.get(), [key]: value });
+      };
+
       const upsert = (input) =>
         guard(async () => {
           const value = await callHost("member/upsert", input);
@@ -1160,6 +1635,26 @@
           const value = await callHost("member/remove", { sessionId });
           store.set((prev) => ({ ...prev, data: value.state, error: null }));
           setEditing(undefined);
+        });
+
+      /**
+       * 手动触发交接（P2）：只**写请求文件**，真正的动作全在监督者那边。
+       *
+       * 为什么面板不自己做：交接要建会话、写成员卡、发公告，还要等安全点 ——
+       * 那些都在监督者的状态机里（`handleInheritRequest`，按 tick 走一小步）。
+       * 面板只负责表达"我要交接"这一个意图。
+       */
+      const doHandover = (sessionId) =>
+        guard(async () => {
+          try {
+            await callHost("inherit/request", { sessionId });
+            setLocalNotice(
+              "交接请求已写入 `control/inherit-request.json`。监督者会在该会话**空闲之后**接手（上限 15 分钟）：" +
+                "写简报 → 建新会话 → 移身份 → 群内公告。进度看 supervisor.log 的 [继承] 行。",
+            );
+          } catch (error) {
+            setLocalNotice(`交接请求未写入：${error instanceof Error ? error.message : String(error)}`);
+          }
         });
 
       /** S3：把成员真正挪到侧边栏 workspace 账户最前（走产品自己的 RPC，合法且可逆）。 */
@@ -1191,10 +1686,72 @@
           );
         });
 
+      // ── P3：90% 强提醒 + 100% 常驻标记 + 「取消报警」────────────────────────
+      // 语义（计划书 §3/§6）：
+      //   · 90%（strong）：**每次进来都提醒** —— 用一条常显的黄色横幅，而不是每 30 秒弹一次 toast
+      //     （后者在面板常开时就是噪声，用户会很快学会无视它）；
+      //   · 100%（schedule）：红色**常驻横幅** + 成员卡的交接按钮转红；
+      //   · 「取消报警」：三档全停，只剩手动按钮；再点一次恢复。
+      const inheritMembers =
+        state.inheritStatus !== null && state.inheritStatus !== undefined && Array.isArray(state.inheritStatus.members)
+          ? state.inheritStatus.members
+          : [];
+      const scheduleOnes = inheritMembers.filter((m) => m !== null && m !== undefined && m.tier === "schedule");
+      const strongOnes = inheritMembers.filter((m) => m !== null && m !== undefined && m.tier === "strong");
+      const toggleAlerts = (next) => {
+        setInheritMuted(next);
+        writeInheritMuted(next);
+        // 写文件是给监督者看的（P5 的自动排期要尊重它）；写失败不影响本地静音
+        void callHost("inherit/alerts", { muted: next }).catch(() => undefined);
+        setLocalNotice(
+          next
+            ? "已取消报警：三档提醒全部静音，继承只能手动点「交接」触发。再点一次可恢复。"
+            : "已恢复提醒：70% / 90% / 100% 三档重新生效。",
+        );
+      };
+      const alertBanner = (() => {
+        const mk = (text, color, actionLabel, action) =>
+          React.createElement(
+            "div",
+            { style: { ...styles.banner, display: "flex", gap: 8, alignItems: "flex-start", borderColor: color } },
+            React.createElement("span", { style: { flex: 1, color } }, text),
+            React.createElement(Button, { onClick: action }, actionLabel),
+          );
+        if (inheritMuted) {
+          return scheduleOnes.length > 0 || strongOnes.length > 0
+            ? mk(
+                `提醒已静音（${scheduleOnes.length} 位 ≥100%、${strongOnes.length} 位 ≥90%）。交接请手动点成员卡上的「交接」。`,
+                C.label3,
+                "恢复提醒",
+                () => toggleAlerts(false),
+              )
+            : null;
+        }
+        if (scheduleOnes.length > 0) {
+          return mk(
+            `🔴 ${scheduleOnes.length} 位成员已超过 100% 阈值：${scheduleOnes.map((m) => `${m.alias} ${m.percent}%`).join("、")}。` +
+              `这些会话在重启后大概率回不来（auto-resume 会跳过），建议尽快交接或归档。`,
+            C.error,
+            "取消报警",
+            () => toggleAlerts(true),
+          );
+        }
+        if (strongOnes.length > 0) {
+          return mk(
+            `⚠️ ${strongOnes.length} 位成员已达 90% 阈值：${strongOnes.map((m) => `${m.alias} ${m.percent}%`).join("、")}。`,
+            C.warn,
+            "取消报警",
+            () => toggleAlerts(true),
+          );
+        }
+        return null;
+      })();
+
       return React.createElement(
         React.Fragment,
         null,
         localNotice !== undefined ? React.createElement("div", { style: styles.banner }, localNotice) : null,
+        alertBanner,
         React.createElement(
           "div",
           { style: styles.section },
@@ -1211,6 +1768,31 @@
               Button,
               { disabled: busy, title: "成员会话行用淡灰底 + 彩色圆点区分", onClick: () => togglePref("tintRows") },
               state.tintRows !== false ? "成员行标记：开" : "成员行标记：关",
+            ),
+            // ★ 单聊层身份底色（2026-11-02）：当前会话的成员颜色 → 会话区/输入框/侧栏当前行。
+            //   只做单聊层；群聊侧已有左右边框标识（用户明确不加消息级配色）。
+            React.createElement(
+              Button,
+              {
+                disabled: busy,
+                title: "当前会话属于某成员时，把它的颜色淡淡染到会话区/输入框/侧栏当前行（只做单聊层）",
+                onClick: () => togglePref("tintSession"),
+              },
+              state.tintSession !== false ? "会话身份底色：开" : "会话身份底色：关",
+            ),
+            React.createElement(
+              Button,
+              {
+                disabled: busy || state.tintSession === false,
+                title: "底色强度（叠一层 alpha：越淡越不干扰阅读）",
+                onClick: () => {
+                  const current = Number(state.tintStrength ?? 14);
+                  const cycle = [8, 14, 18, 22];
+                  const index = cycle.indexOf(current);
+                  setPref("tintStrength", cycle[(index + 1) % cycle.length]);
+                },
+              },
+              `底色强度：${Number(state.tintStrength ?? 14)}%`,
             ),
           ),
           members.map((member) =>
@@ -1230,6 +1812,8 @@
                   summary: byId[member.sessionId],
                   activity: activityOf(member.sessionId),
                   queue: queueDepthBySession.get(member.sessionId),
+                  inherit: inheritOf(state.inheritStatus, member.sessionId),
+                  onHandover: doHandover,
                   syncHint: member.pinned && readSidebarOrderBy() === "updated" ? "侧边栏需切到手动排序" : undefined,
                   onToggleLock: (next) => upsert({ sessionId: member.sessionId, locked: next }),
                   onTogglePin: (next) => upsert({ sessionId: member.sessionId, pinned: next }),
@@ -1952,7 +2536,7 @@
             multiMode === true
               ? React.createElement("span", { style: { fontVariant: "tabular-nums" } }, checked ? "☑" : "☐")
               : null,
-            React.createElement("span", { style: styles.dot(COLOR_OF[member.color] ?? C.label3) }),
+            React.createElement("span", { style: styles.dot(resolveMemberColor(member.color)) }),
             member.alias.length > 0 ? member.alias : shortId(member.sessionId),
             running ? React.createElement("span", { style: { color: C.ok } }, "●") : null,
           );
@@ -2522,6 +3106,37 @@
       }
     }
 
+    /**
+     * 静默刷新成员表（**不写 error**）。
+     *
+     * 与 `refresh()` 的区别：`refresh()` 失败会把面板顶成红色横幅（那是用户主动点刷新时的正确反馈）；
+     * 后台轮询失败只说明"这一刻拉不到"，不该把界面染红。所以这条路径一律吞掉异常。
+     */
+    async function refreshMembersQuietly(store) {
+      try {
+        const value = await callHost("state");
+        store.set((prev) => ({ ...prev, data: value }));
+      } catch {
+        /* 后台轮询失败不打扰用户 */
+      }
+    }
+
+    /**
+     * 只刷新「继承档位」这一块（P1，只读）。
+     *
+     * 为什么单独一个函数：它比 `state` 变得勤（监督者每 60 秒重算一次），
+     * 而成员表几乎不变 —— 混在一起会让整张面板无谓重绘。
+     * 失败一律静默：拿不到档位只意味着**不显示那个小标签**，不影响任何功能。
+     */
+    async function refreshInheritStatus(store) {
+      try {
+        const value = await callHost("inherit/status");
+        store.set((prev) => ({ ...prev, inheritStatus: value !== undefined && value !== null ? value.status ?? null : null }));
+      } catch {
+        /* 监督者没跑、或 status 还没写出 —— 都不是错误 */
+      }
+    }
+
     /** 侧边栏底部开关（list 槽位）。 */
     function SidebarToggle(props) {
       const { store } = props;
@@ -2562,6 +3177,96 @@
       );
     }
 
+    /**
+     * 会话视图里的**圆形继承按钮**（用户口径 2026-10-21）。
+     *
+     * 挂载点是产品槽位 `conversation.chat.assistant-actions` —— 原文档描述：
+     *   "Action strip attached to one finalized assistant message, rendered inside
+     *    that message's IconActions row"，也就是**复制 / 分支 / 时间**那一行。
+     * 用户的要求：「圆形、放在对话文字框外部的右上角、与那一行平行但靠右」——
+     * 这一行本来就是右对齐的，所以加 `marginLeft:auto` 即可贴到最右。
+     *
+     * 按下后：**写 `control/inherit-request.json` ⇒ 自动触发继承排期**
+     * （监督者下一 tick 接手；它会等会话空闲，然后建新会话 + 移身份 + 群内公告）。
+     *
+     * 为什么要单独一个按钮而不是只在成员台里放：
+     *   交接本质上发生在**你正在聊的这个会话**上，按钮应该跟着会话走，
+     *   而不是要求用户先去成员台里找到对应的那张卡。
+     */
+    function HandoverFab(props) {
+      const { store } = props;
+      const state = useStore(store);
+      const useSessions = typeof props.useSessions === "function" ? props.useSessions : () => undefined;
+      const snapshot = useSessions((value) => value);
+      const current = snapshot !== null && snapshot !== undefined ? snapshot.current : undefined;
+      const [busy, setBusy] = React.useState(false);
+      const [failed, setFailed] = React.useState(undefined);
+      if (typeof current !== "string" || current.length === 0) return null;
+      // 只对**成员会话**出现（用户口径 2026-10-21：这一整套机制只覆盖成员）。
+      // 非成员会话交接没有意义：监督者那侧 `groupChat:true` 会因"旧会话不是工作室成员"直接失败。
+      const members = state.data !== null && state.data !== undefined && Array.isArray(state.data.members) ? state.data.members : [];
+      if (!members.some((m) => m !== null && m !== undefined && m.sessionId === current)) return null;
+
+      const inherit = inheritOf(state.inheritStatus, current);
+      const percent = inherit !== undefined && inherit.percent !== null && inherit.percent !== undefined ? Math.round(inherit.percent) : null;
+      const tier = inherit !== undefined ? inherit.tier : "silent";
+      // 圆形按钮的配色：≥100% 红、≥90% 橙、≥70% 黄、其余灰（与成员卡一致）
+      const ring =
+        tier === "schedule" ? C.error : tier === "strong" ? C.warn : tier === "warn" ? C.warn : C.border;
+      const round =
+        inherit !== undefined && inherit.eventsSource === "bytes-estimate" ? "≈" : "";
+      const title =
+        percent === null
+          ? "触发本会话的交接排期（会新建一个会话、把身份移过去）。当前还拿不到会话规模读数。"
+          : `本会话 ${percent}% 阈值${round ? "（估算）" : ""}。按下⇒写交接请求，监督者会在本会话空闲后接手。`;
+
+      const onClick = async () => {
+        if (busy) return;
+        setBusy(true);
+        setFailed(undefined);
+        try {
+          await callHost("inherit/request", { sessionId: current });
+          store.set({ notice: "已排期交接：请求已写入 control/inherit-request.json，监督者会在本会话空闲后接手。" });
+        } catch (error) {
+          setFailed(error instanceof Error ? error.message : String(error));
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick,
+          disabled: busy,
+          title: failed !== undefined ? `失败：${failed}` : title,
+          "aria-label": "触发本会话的继承排期",
+          style: {
+            marginLeft: "auto", // 贴到整行最右
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            border: `1.5px solid ${failed !== undefined ? C.error : ring}`,
+            background: "transparent",
+            color: failed !== undefined ? C.error : ring,
+            cursor: busy ? "default" : "pointer",
+            fontFamily: "inherit",
+            fontSize: 9,
+            fontWeight: 700,
+            lineHeight: 1,
+            padding: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: "none",
+            opacity: busy ? 0.5 : 1,
+          },
+        },
+        percent === null ? "⇄" : `${round}${percent}`,
+      );
+    }
+
     function apply(ctx) {
       const prefs = readUiPrefs();
       const store = createStore({
@@ -2575,6 +3280,10 @@
         tintRows: prefs.tintRows,
         hideInSession: prefs.hideInSession,
         showReceipts: prefs.showReceipts,
+        // ★ 2026-11-02：单聊层身份底色的两个偏好也要进 store —— 这个初始化是**白名单**，
+        //   漏加就会让开关"点了没反应"（面板显示开、实际读到的还是默认值）。
+        tintSession: prefs.tintSession,
+        tintStrength: prefs.tintStrength,
         dockWidth: prefs.dockWidth,
       });
 
@@ -2789,6 +3498,16 @@
           ctx.slots.inject("sidebar.footer.action", () =>
             register("sidebar.footer.action", () => React.createElement(SidebarToggle, { store })),
           ),
+          // ★ 会话回合操作条上的**圆形继承按钮**（用户口径 2026-10-21）。
+          //   槽位原文：「Action strip attached to one finalized assistant message,
+          //   rendered inside that message's IconActions row」—— 即复制/分支/时间那一行。
+          //   每个助手消息各有一个实例，但只对**当前会话**生效（会话 id 从 useSessions 取）。
+          ctx.slots.inject("conversation.chat.assistant-actions", () =>
+            ctx.slots.register(
+              { name: "conversation.chat.assistant-actions", id: `${PLUGIN_ID}-handover`, order: 90, label: "交接排期" },
+              (slotProps) => React.createElement(HandoverFab, { store, ...slotProps }),
+            ),
+          ),
         );
       } else {
         console.warn(PREFIX, "slots service unavailable — no UI registered");
@@ -2872,6 +3591,8 @@
           let unresolved = 0;
           for (const row of document.querySelectorAll('[role="treeitem"]')) {
             if (!String(row.className).includes("sessionRow")) continue;
+            // ★ 跳过我们自己的代理行（2026-10-25）：它是克隆出来的死 DOM，再标一遍会污染 anchors 分母。
+            if (row.closest(`[${PROXY_ATTR}]`) !== null) continue;
             const wrapper = row.parentElement;
             if (wrapper === null) continue;
             const id = sessionIdOfRow(row);
@@ -2882,6 +3603,12 @@
               if (wrapper.hasAttribute(ROW_ATTR) && misses >= MISS_LIMIT) wrapper.removeAttribute(ROW_ATTR);
             } else {
               wrapper.removeAttribute(MISS_ATTR);
+              // 顺手记住真实行的会话标题（代理行要用；见 rememberedTitles 的说明）
+              const titleEl = row.children[1];
+              if (titleEl !== undefined) {
+                const text = String(titleEl.textContent ?? "").trim();
+                if (text.length > 0) rememberedTitles.set(id, text);
+              }
               if (byId.has(id)) {
                 wrapper.setAttribute(ROW_ATTR, id);
                 const rank = memberRank.get(id);
@@ -2900,6 +3627,44 @@
           //   这类"外部呈现"最容易静默失效，所以必须留一个能被外部读到的分母。
           document.documentElement.setAttribute(ANCHORS_ATTR, String(anchors));
           document.documentElement.setAttribute(UNRESOLVED_ATTR, String(unresolved));
+
+          // ★ 3) 预览窗口之外的成员 → 补代理行（2026-10-25，用户报"收起时只看到 4 个置顶成员"）。
+          //   外壳收起态只渲染列表前 N 条，成员行若落在窗口外就**不在 DOM 里**，order 标注无处可打。
+          //   这里给缺席的活成员克隆一行（同容器、同配色、点击走 SessionTree 的 open(id)）。
+          try {
+            const pinOn = store.get().pinInSidebar !== false;
+            const proxyCount = pinOn ? syncMemberProxies(members, retiredIds, memberRank) : (() => {
+              for (const node of [...document.querySelectorAll(`[${PROXY_ATTR}]`)]) node.remove();
+              return 0;
+            })();
+            document.documentElement.setAttribute(PROXIES_ATTR, String(proxyCount));
+          } catch (error) {
+            document.documentElement.setAttribute(PROXIES_ATTR, "err");
+            decorateError = `代理行：${error instanceof Error ? error.message : String(error)}`;
+          }
+
+          // ★ 4) 单聊层身份底色（2026-11-02）：把"当前会话属于哪位成员"的颜色算出来并写到三处。
+          //   当前会话从**侧栏选中行**解析（`aria-selected="true"`）；侧栏收起时那一行可能不在 DOM，
+          //   此时沿用上一次的身份（lastTintSessionId），避免"收起侧栏 ⇒ 底色闪一下没了"。
+          try {
+            // ① 以**会话视图**为准（代理行打开时侧栏没有选中行，见 activeSessionIdOfConversation 的说明）
+            let activeId = activeSessionIdOfConversation();
+            // ② 会话视图读不到（还没打开任何会话）→ 退回侧栏选中行
+            if (activeId === null) {
+              const selectedRow = document.querySelector('[role="treeitem"][aria-selected="true"]');
+              if (selectedRow !== null) {
+                const resolved = sessionIdOfRow(selectedRow);
+                if (resolved !== undefined) activeId = resolved;
+              }
+            }
+            // ③ 都读不到 → 沿用上次
+            if (activeId === null) activeId = lastTintSessionId;
+            lastTintSessionId = activeId;
+            applySessionTint(members, activeId, store.get());
+          } catch (error) {
+            document.documentElement.setAttribute(TINT_ATTR, "err");
+            decorateError = `身份底色：${error instanceof Error ? error.message : String(error)}`;
+          }
 
           // 2) 量出侧边栏实时宽度 → 面板停在它右侧；并按窗口宽度决定**让位**还是**浮层**：
           //    能同时容下「面板最小宽 + 会话列最小宽」就挤开一段留白，否则改为浮层覆盖，
@@ -2951,11 +3716,13 @@
             state.pinInSidebar !== false ? "pin" : "nopin",
             state.tintRows !== false ? "tint" : "notint",
             state.hideInSession !== false ? "hide" : "nohide",
+            // ★ 2026-11-02：身份底色的开关也进 key —— 否则切换开关不会重建样式表（规则仍在/仍缺）
+            state.tintSession !== false ? "session-tint" : "no-session-tint",
           ].join("|");
           if (cssKey !== lastCssKey) {
             lastCssKey = cssKey;
             const colorRules = members
-              .map((member) => `[${ROW_ATTR}="${member.sessionId}"]{--dsh-studio-member-color:${COLOR_OF[member.color] ?? "#8a8f98"};}`)
+              .map((member) => `[${ROW_ATTR}="${member.sessionId}"]{--dsh-studio-member-color:${resolveMemberColor(member.color)};}`)
               .join("");
             ensureStyleTag().textContent = buildSidebarCss(colorRules, state);
           }
@@ -2970,6 +3737,18 @@
       decorateSidebar();
       const decorateTimer = window.setInterval(decorateSidebar, 1200);
       registrations.push(() => window.clearInterval(decorateTimer));
+      // ── 30 秒静默轮询：档位 + **成员表** ──────────────────────────────────
+      //    档位：监督者每 60 秒重算一次 inherit-status.json，30 秒读频足够跟上；
+      //    成员表：**交接会把成员卡从旧会话挪到新会话**，而客户端原本只在"打开面板/手动刷新"
+      //    时拉 state ⇒ 不刷新就会看到「旧会话仍置顶、新会话排在下面」的假象
+      //    （2026-10-21 一次交接后实测踩到）。state 是内存里的 JSON（约 5KB），成本可忽略。
+      const pollQuietly = () => {
+        void refreshInheritStatus(store);
+        void refreshMembersQuietly(store);
+      };
+      pollQuietly();
+      const inheritStatusTimer = window.setInterval(pollQuietly, 30000);
+      registrations.push(() => window.clearInterval(inheritStatusTimer));
       // 成员或开关一变立刻重绘，不必等下一次轮询
       registrations.push(store.subscribe(() => decorateSidebar()));
 
