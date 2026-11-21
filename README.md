@@ -173,10 +173,10 @@ ln -sfn "<本包所在目录>" "$HOME/.dsh/profiles/web/node_modules/dsh-studio"
 node bin/say.mjs --list
 
 # 给某个成员发一条（发送者身份自动取 $DSH_SESSION_ID，所以它在哪个会话里跑就是谁发的）
-node bin/say.mjs --to "教练成员" --kind ask --text "请帮我修 05-数据结构 那批编译不过的模板"
+node bin/say.mjs --to "示例甲" --kind ask --text "请帮我修 05-数据结构 那批编译不过的模板"
 
 # 只看构造结果、不真的发（自检用）
-node bin/say.mjs --to "站点成员" --text "..." --dry-run
+node bin/say.mjs --to "示例乙" --text "..." --dry-run
 ```
 
 - 任何会话里的 agent 都可以直接这样调用（它本来就有 shell 工具），**不需要先注册什么工具**。

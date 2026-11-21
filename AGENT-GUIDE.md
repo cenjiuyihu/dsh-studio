@@ -20,17 +20,17 @@ node bin/say.mjs --list
 node bin/say.mjs --inbox
 
 # ③ 找某位成员帮忙（ask = 委托）—— 正文短、没有引号时可以直接写
-node bin/say.mjs --to "教练成员" --kind ask --text "请帮我修 05-数据结构 那批编译不过的模板，只改编译错误"
+node bin/say.mjs --to "示例甲" --kind ask --text "请帮我修 05-数据结构 那批编译不过的模板，只改编译错误"
 
 # ④ 正文含代码 / JSON / 引号时 —— **一律用文件或 stdin**（见下面的引号坑）
-node bin/say.mjs --to "站点成员" --kind ask --text-file C:\tmp\msg.md
-node bin/say.mjs --to "站点成员" --kind deliver --text -
+node bin/say.mjs --to "示例乙" --kind ask --text-file C:\tmp\msg.md
+node bin/say.mjs --to "示例乙" --kind deliver --text -
 
 # ⑤ 一次通知多个成员（同一份裁决要通知多方时）
-node bin/say.mjs --to "教练成员,站点成员" --kind deliver --text-file C:\tmp\ruling.md
+node bin/say.mjs --to "示例甲,示例乙" --kind deliver --text-file C:\tmp\ruling.md
 
 # ⑥ 代别人转达（标明转达关系，避免对方当成你的观点）
-node bin/say.mjs --to "教练成员" --kind deliver --on-behalf-of "站点成员" --text-file C:\tmp\msg.md
+node bin/say.mjs --to "示例甲" --kind deliver --on-behalf-of "示例乙" --text-file C:\tmp\msg.md
 ```
 
 ### ⚠️ 引号坑（踩过，很重要）
@@ -55,7 +55,7 @@ node bin/say.mjs --to "教练成员" --kind deliver --on-behalf-of "站点成员
 node bin/say.mjs --inbox
 
 # 回复并精确引用那一条 —— 会自动在正文最前带一行「> 回复 #abc123（来自 X，时间）：首行」
-node bin/say.mjs --to "站点成员" --kind deliver --reply-to abc123 --text-file C:\tmp\reply.md
+node bin/say.mjs --to "示例乙" --kind deliver --reply-to abc123 --text-file C:\tmp\reply.md
 ```
 
 短 id 也能在**工作室面板的「群聊」页**每条消息上看到，人也可以照着引用。
@@ -64,7 +64,7 @@ node bin/say.mjs --to "站点成员" --kind deliver --reply-to abc123 --text-fil
 **发送者身份是自动的**：命令会取 `$DSH_SESSION_ID`（你当前所在会话），再从成员表查你的显示名。
 所以**从哪个会话跑，就是谁发的**，不需要手动声明。
 
-**投递回执里会带目标当时的状态**（`✅ 站点成员 已入队 · 当时 🔴 运行中（会排队）`），
+**投递回执里会带目标当时的状态**（`✅ 示例乙 已入队 · 当时 🔴 运行中（会排队）`），
 便于你判断节奏 —— 别把"对方在跑别的回合所以还没回"误判成丢包。
 
 > **状态口径（别把两件事混为一谈）**：`--list` 与投递回执里的 🔴/🟢 取自
@@ -232,7 +232,7 @@ node bin/say.mjs --unpause               # 解除
 
 - 别人发给你的群聊消息，会以这样一行开头进入你的会话：
   ```
-  【群聊·我的工作室｜ask｜来自 站点成员】
+  【群聊·我的工作室｜ask｜来自 示例乙】
   （正文…）
   ```
 - 这些**群聊回合**在单会话视图里是**收起的**，但**消息本体保留成一行摘要**（就是上面那个前缀行：

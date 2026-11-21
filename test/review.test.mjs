@@ -15,19 +15,19 @@ const at = (s) => `2026-09-22T00:00:${String(s).padStart(2, '0')}.000Z`
 // ── 规则 1：提审/批准都必须带 scope ───────────────────────────────────────────
 test('提审必须带 scope（空/全空白都不行）', () => {
   const d = emptyReviews()
-  assert.throws(() => submit(d, { taskId: 'T1', scope: [], by: '站点成员' }), /scope/)
-  assert.throws(() => submit(d, { taskId: 'T1', scope: ['  ', ''], by: '站点成员' }), /scope/)
-  const t = submit(d, { taskId: 'T1', scope: ['改 a.cpp 的编译错误'], by: '站点成员', at: at(1) })
+  assert.throws(() => submit(d, { taskId: 'T1', scope: [], by: '示例乙' }), /scope/)
+  assert.throws(() => submit(d, { taskId: 'T1', scope: ['  ', ''], by: '示例乙' }), /scope/)
+  const t = submit(d, { taskId: 'T1', scope: ['改 a.cpp 的编译错误'], by: '示例乙', at: at(1) })
   assert.equal(t.v, 1)
   assert.equal(t.phase, 'submitted')
 })
 
 test('批准必须带 scope —— 显式空数组也要被拒（"批准了 A、顺手做了 B" 的入口）', () => {
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '站点成员', at: at(1) })
-  assert.throws(() => decide(d, { taskId: 'T1', phase: 'approved', by: '教练', scope: [], at: at(2) }), /scope/)
+  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '示例乙', at: at(1) })
+  assert.throws(() => decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', scope: [], at: at(2) }), /scope/)
   // 省略 scope ⇒ 沿用提审时的 scope（允许）
-  const t = decide(d, { taskId: 'T1', phase: 'approved', by: '教练', at: at(2) })
+  const t = decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', at: at(2) })
   assert.equal(t.phase, 'approved')
   assert.deepEqual(t.scope, ['改 a.cpp'])
 })
@@ -35,10 +35,10 @@ test('批准必须带 scope —— 显式空数组也要被拒（"批准了 A、
 // ── 规则 2：驳回必须带「理由 + 要改什么」────────────────────────────────────
 test('驳回必须同时给理由和"要改什么"', () => {
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '站点成员', at: at(1) })
-  assert.throws(() => decide(d, { taskId: 'T1', phase: 'rejected', by: '教练', reason: '不行', at: at(2) }), /要改什么/)
-  assert.throws(() => decide(d, { taskId: 'T1', phase: 'rejected', by: '教练', changes: '改注释', at: at(2) }), /理由/)
-  const t = decide(d, { taskId: 'T1', phase: 'changes-requested', by: '教练', reason: '块注释没剥离', changes: '剥掉块注释再跑', at: at(2) })
+  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '示例乙', at: at(1) })
+  assert.throws(() => decide(d, { taskId: 'T1', phase: 'rejected', by: '示例甲', reason: '不行', at: at(2) }), /要改什么/)
+  assert.throws(() => decide(d, { taskId: 'T1', phase: 'rejected', by: '示例甲', changes: '改注释', at: at(2) }), /理由/)
+  const t = decide(d, { taskId: 'T1', phase: 'changes-requested', by: '示例甲', reason: '块注释没剥离', changes: '剥掉块注释再跑', at: at(2) })
   assert.equal(t.phase, 'changes-requested')
   assert.equal(t.reason, '块注释没剥离')
 })
@@ -58,10 +58,10 @@ test('闸门：未提审/未批准/不覆盖 三种情况都拒；覆盖才放�
   const d = emptyReviews()
   assert.equal(checkGate(d, { taskId: 'T1', action: '落盘 a.cpp' }).ok, false, '没提审 ⇒ 拒')
 
-  submit(d, { taskId: 'T1', scope: ['改 a.cpp 的编译错误'], by: '站点成员', at: at(1) })
+  submit(d, { taskId: 'T1', scope: ['改 a.cpp 的编译错误'], by: '示例乙', at: at(1) })
   assert.equal(checkGate(d, { taskId: 'T1', action: '改 a.cpp 的编译错误' }).ok, false, '只是 submitted ⇒ 拒')
 
-  decide(d, { taskId: 'T1', phase: 'approved', by: '教练', at: at(2) })
+  decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', at: at(2) })
   assert.equal(checkGate(d, { taskId: 'T1', action: '改 a.cpp 的编译错误' }).ok, true, '已批准且逐字覆盖 ⇒ 放行')
   assert.equal(
     checkGate(d, { taskId: 'T1', action: '改 a.cpp 的编译错误（第 3 行）' }).ok,
@@ -77,8 +77,8 @@ test('闸门：未提审/未批准/不覆盖 三种情况都拒；覆盖才放�
 // ── 规则 6：过期即未批准（读取时判定，不写文件）─────────────────────────────
 test('过期 ⇒ expired ⇒ 闸门拒；且不改写文件里的 phase', () => {
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '站点成员', at: at(1), expiresAt: 1000 })
-  decide(d, { taskId: 'T1', phase: 'approved', by: '教练', at: at(2) })
+  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '示例乙', at: at(1), expiresAt: 1000 })
+  decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', at: at(2) })
   const task = d.tasks.T1
   assert.equal(effectivePhase(task, 999), 'approved')
   assert.equal(effectivePhase(task, 2000), 'expired')
@@ -89,25 +89,25 @@ test('过期 ⇒ expired ⇒ 闸门拒；且不改写文件里的 phase', () => 
 // ── 规则 5：scope 不可变 ⇒ 重新提审 = 新版本 + 旧批准失效 ───────────────────
 test('范围一变就必须重新提审：版本 +1，旧批准立即失效', () => {
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['改 8 处编译错误'], by: '站点成员', at: at(1) })
-  decide(d, { taskId: 'T1', phase: 'approved', by: '教练', at: at(2) })
+  submit(d, { taskId: 'T1', scope: ['改 8 处编译错误'], by: '示例乙', at: at(1) })
+  decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', at: at(2) })
   assert.equal(checkGate(d, { taskId: 'T1', action: '改 8 处编译错误' }).ok, true)
 
   // 范围变成 90 处 ⇒ 必须重新提审
-  const t2 = submit(d, { taskId: 'T1', scope: ['改 90 处函数定义'], by: '站点成员', at: at(3) })
+  const t2 = submit(d, { taskId: 'T1', scope: ['改 90 处函数定义'], by: '示例乙', at: at(3) })
   assert.equal(t2.v, 2)
   assert.equal(t2.phase, 'submitted', '新版本回到 submitted')
   assert.equal(checkGate(d, { taskId: 'T1', action: '改 8 处编译错误' }).ok, false, '旧批准立即失效')
   assert.equal(checkGate(d, { taskId: 'T1', action: '改 90 处函数定义' }).ok, false, '新版本还没批')
-  decide(d, { taskId: 'T1', phase: 'approved', by: '教练', at: at(4) })
+  decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', at: at(4) })
   assert.equal(checkGate(d, { taskId: 'T1', action: '改 90 处函数定义' }).ok, true)
 })
 
 test('历史保留：每次提交与决定都进 history', () => {
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['a'], by: '站点成员', at: at(1) })
-  decide(d, { taskId: 'T1', phase: 'changes-requested', by: '教练', reason: 'r', changes: 'c', at: at(2) })
-  submit(d, { taskId: 'T1', scope: ['a', 'b'], by: '站点成员', at: at(3) })
+  submit(d, { taskId: 'T1', scope: ['a'], by: '示例乙', at: at(1) })
+  decide(d, { taskId: 'T1', phase: 'changes-requested', by: '示例甲', reason: 'r', changes: 'c', at: at(2) })
+  submit(d, { taskId: 'T1', scope: ['a', 'b'], by: '示例乙', at: at(3) })
   const kinds = d.tasks.T1.history.map((h) => `${h.v}:${h.phase}`)
   assert.deepEqual(kinds, ['1:submitted', '1:changes-requested', '2:submitted'])
 })
@@ -129,7 +129,7 @@ test('存取往返一致，且没有残留 .tmp', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-review-'))
   const file = path.join(dir, 'reviews.json')
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '站点成员', at: at(1) })
+  submit(d, { taskId: 'T1', scope: ['改 a.cpp'], by: '示例乙', at: at(1) })
   saveReviews(file, d)
   assert.equal(fs.existsSync(`${file}.tmp`), false)
   assert.deepEqual(loadReviews(file).tasks.T1.scope, ['改 a.cpp'])
@@ -138,8 +138,8 @@ test('存取往返一致，且没有残留 .tmp', () => {
 
 test('formatReview 能把"过期"显示出来（原相位与实际相位不一致时标注）', () => {
   const d = emptyReviews()
-  submit(d, { taskId: 'T1', scope: ['x'], by: '站点成员', at: at(1), expiresAt: 1000 })
-  decide(d, { taskId: 'T1', phase: 'approved', by: '教练', at: at(2) })
+  submit(d, { taskId: 'T1', scope: ['x'], by: '示例乙', at: at(1), expiresAt: 1000 })
+  decide(d, { taskId: 'T1', phase: 'approved', by: '示例甲', at: at(2) })
   assert.match(formatReview(d.tasks.T1, 2000), /phase=expired（原为 approved）/)
   assert.ok(PHASES.includes('approved'))
 })

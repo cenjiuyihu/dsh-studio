@@ -1,6 +1,6 @@
 // dsh-studio — `--inbox` 判定规则的单测（8 个分支全覆盖）。
 //
-// 为什么需要它：成员「教练成员」复验时**如实报告** ⚪「比我最早的发出记录还早 N 秒」
+// 为什么需要它：成员「示例甲」复验时**如实报告** ⚪「比我最早的发出记录还早 N 秒」
 // 这条分支在真实会话里**无法触发**（账本只会越来越完整），它问"要不要给我个场景专测"。
 // 靠构造真实历史去触发是不现实的 —— 所以把判定抽成纯函数，用单测把 8 个分支全钉住。
 //
@@ -58,7 +58,7 @@ test('分支 6：非 ask、在覆盖范围内、有证据、没回过 → 中性
   const result = run({ kind: 'say', replied: false })
   assert.equal(result.verdict, '○ 未回过（非 ask，按礼节无需回执）')
   assert.equal(result.debt, false, '"没回过"不是欠账（只有 ask 才有回执义务）')
-  assert.equal(result.verdict.includes('⚠️'), false, '★ ⚠️ 只允许出现在 ask 行上（成员「教练成员」5/5 反例）')
+  assert.equal(result.verdict.includes('⚠️'), false, '★ ⚠️ 只允许出现在 ask 行上（成员「示例甲」5/5 反例）')
 })
 
 test('分支 6b：它是回复我某一条的 → 已闭环，不是欠账', () => {

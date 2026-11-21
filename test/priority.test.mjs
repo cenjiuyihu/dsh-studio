@@ -15,7 +15,7 @@ import os from 'node:os'
 
 import { PRIORITY, apply, classify, messageText, reorderByPriority } from '../src/priority.js'
 
-const LABELS = new Set(['站点成员', '教练成员', '插件'])
+const LABELS = new Set(['示例乙', '示例甲', '插件'])
 const group = (from, kind, body) => `【群聊·我的工作室｜${kind}｜来自 ${from}】\n${body}`
 const msg = (id, text) => ({ id, content: [{ type: 'text', text }] })
 
@@ -28,11 +28,11 @@ test('messageText：拼接所有 text 块，忽略非文本块', () => {
 
 test('判档：普通消息 = 用户，成员发的群聊 = memberGroup，非成员发的群聊 = humanGroup', () => {
   assert.equal(classify(msg('1', '帮我修一下这个模板'), LABELS), 'user')
-  assert.equal(classify(msg('2', group('站点成员', 'ask', '帮我修一下')), LABELS), 'memberGroup')
+  assert.equal(classify(msg('2', group('示例乙', 'ask', '帮我修一下')), LABELS), 'memberGroup')
   assert.equal(classify(msg('3', group('我', 'say', '你们看一下')), LABELS), 'humanGroup')
   assert.equal(classify(msg('4', group('陌生人', 'say', 'hi')), LABELS), 'humanGroup')
   assert.equal(classify(msg('5', ''), LABELS), 'unknown')
-  assert.equal(classify(msg('6', '【群聊格式写坏了 来自 站点成员】'), LABELS), 'user', '前缀不合法时按普通消息处理（不能误判成群聊）')
+  assert.equal(classify(msg('6', '【群聊格式写坏了 来自 示例乙】'), LABELS), 'user', '前缀不合法时按普通消息处理（不能误判成群聊）')
 })
 
 test('档位数值：用户 0 < 人发起的群聊 1 < 成员发起的群聊 2', () => {
@@ -43,11 +43,11 @@ test('档位数值：用户 0 < 人发起的群聊 1 < 成员发起的群聊 2',
 
 test('重排：把人的消息提到最前，且**同档保持原顺序**', () => {
   const list = [
-    msg('m1', group('站点成员', 'deliver', 'A')),
-    msg('m2', group('教练成员', 'deliver', 'B')),
+    msg('m1', group('示例乙', 'deliver', 'A')),
+    msg('m2', group('示例甲', 'deliver', 'B')),
     msg('h1', group('我', 'say', 'C')),
     msg('u1', '我打的字'),
-    msg('m3', group('站点成员', 'say', 'D')),
+    msg('m3', group('示例乙', 'say', 'D')),
   ]
   const { items, changed } = reorderByPriority(list, LABELS)
   assert.equal(changed, true)
@@ -59,14 +59,14 @@ test('重排：把人的消息提到最前，且**同档保持原顺序**', () =
 })
 
 test('重排：已经是正确顺序时 changed=false（不去写 Inbox，避免无意义的持久事件）', () => {
-  const list = [msg('u1', '人'), msg('h1', group('我', 'say', '人发的')), msg('m1', group('站点成员', 'say', '机器人发的'))]
+  const list = [msg('u1', '人'), msg('h1', group('我', 'say', '人发的')), msg('m1', group('示例乙', 'say', '机器人发的'))]
   const { items, changed } = reorderByPriority(list, LABELS)
   assert.equal(changed, false)
   assert.deepEqual(items.map((m) => m.id), ['u1', 'h1', 'm1'])
 })
 
 test('重排：不丢不重（同一条消息对象原样搬，身份不变）', () => {
-  const list = [msg('m1', group('站点成员', 'say', 'x')), msg('u1', 'u'), msg('m2', group('站点成员', 'say', 'y'))]
+  const list = [msg('m1', group('示例乙', 'say', 'x')), msg('u1', 'u'), msg('m2', group('示例乙', 'say', 'y'))]
   const { items } = reorderByPriority(list, LABELS)
   assert.equal(items.length, 3)
   assert.deepEqual(new Set(items.map((m) => m.id)), new Set(['m1', 'u1', 'm2']))
@@ -125,8 +125,8 @@ test('接线：插入之后真的把用户的排队消息提到成员消息之�
         version: 1,
         activeGroupId: 'main',
         members: {
-          'session-11111111-1111-1111-1111-111111111111': { sessionId: 'session-11111111-1111-1111-1111-111111111111', alias: '站点成员', color: 'blue', locked: true, pinned: true },
-          'session-22222222-2222-2222-2222-222222222222': { sessionId: 'session-22222222-2222-2222-2222-222222222222', alias: '教练成员', color: 'violet', locked: true, pinned: true },
+          'session-11111111-1111-1111-1111-111111111111': { sessionId: 'session-11111111-1111-1111-1111-111111111111', alias: '示例乙', color: 'blue', locked: true, pinned: true },
+          'session-22222222-2222-2222-2222-222222222222': { sessionId: 'session-22222222-2222-2222-2222-222222222222', alias: '示例甲', color: 'violet', locked: true, pinned: true },
         },
         groups: { main: { groupId: 'main', name: '我的工作室', memberIds: [] } },
       }),
@@ -139,8 +139,8 @@ test('接线：插入之后真的把用户的排队消息提到成员消息之�
     assert.equal(typeof handler, 'function', '插件必须监听 agent/inbox/inserted')
 
     const inbox = fakeInbox([
-      msg('m1', group('站点成员', 'ask', '请修模板')),
-      msg('m2', group('教练成员', 'deliver', '结论如下')),
+      msg('m1', group('示例乙', 'ask', '请修模板')),
+      msg('m2', group('示例甲', 'deliver', '结论如下')),
     ])
     // 人打了一条普通消息进来 → 触发重排
     inbox.state['next-turn'].push(msg('u1', '你先看我这个'))
@@ -178,7 +178,7 @@ test('接线：已经是正确顺序时不写 Inbox；读不到成员表时不�
     const handler = ctx.handlers.get('agent/inbox/inserted')
 
     // 没有成员表 → labels 为空 → 直接返回，不动 Inbox
-    const inbox = fakeInbox([msg('m1', group('站点成员', 'say', 'x')), msg('u1', 'y')])
+    const inbox = fakeInbox([msg('m1', group('示例乙', 'say', 'x')), msg('u1', 'y')])
     handler({ agent: { inbox } })
     assert.equal(inbox.calls.length, 0, '读不到成员表时必须完全不干预')
 
@@ -189,12 +189,12 @@ test('接线：已经是正确顺序时不写 Inbox；读不到成员表时不�
       JSON.stringify({
         version: 1,
         activeGroupId: 'main',
-        members: { 'session-11111111-1111-1111-1111-111111111111': { sessionId: 'session-11111111-1111-1111-1111-111111111111', alias: '站点成员', color: 'blue', locked: true, pinned: true } },
+        members: { 'session-11111111-1111-1111-1111-111111111111': { sessionId: 'session-11111111-1111-1111-1111-111111111111', alias: '示例乙', color: 'blue', locked: true, pinned: true } },
         groups: { main: { groupId: 'main', name: '我的工作室', memberIds: [] } },
       }),
       'utf8',
     )
-    const inbox2 = fakeInbox([msg('u1', '人的消息'), msg('m1', group('站点成员', 'say', '成员的'))])
+    const inbox2 = fakeInbox([msg('u1', '人的消息'), msg('m1', group('示例乙', 'say', '成员的'))])
     handler({ agent: { inbox: inbox2 } })
     assert.equal(inbox2.calls.length, 0, '顺序正确时不该产生持久事件')
   } finally {

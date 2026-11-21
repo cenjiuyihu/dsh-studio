@@ -23,7 +23,7 @@ const NEW_ID = 'session-11111111-1111-4111-8111-111111111111'
 const OLD_ID = 'session-22222222-2222-4222-8222-222222222222'
 const NEW = { sessionId: NEW_ID, alias: '维护者', locked: true }
 const OLD = { sessionId: OLD_ID, alias: '旧[2026-10-08]维护者', locked: false }
-const COACH = { sessionId: 'session-33333333-3333-4333-8333-333333333333', alias: '教练', locked: true }
+const COACH = { sessionId: 'session-33333333-3333-4333-8333-333333333333', alias: '示例甲', locked: true }
 
 /** 2026-10-08 之前的实现原样照抄（用于正对照）。 */
 function legacyFindMember(members, query) {
@@ -79,7 +79,7 @@ check('「维护者(旧)」→ 退役记录（而不是新记录）', name(findM
 check('全角括号「维护者（旧）」→ 退役记录', name(findMember([OLD, NEW], '维护者（旧）')), '旧[2026-10-08]维护者')
 check('「维护者(旧)」在反序成员表里同样命中退役记录', name(findMember([NEW, OLD], '维护者(旧)')), '旧[2026-10-08]维护者')
 check('没有任何退役记录时，带 (旧) 的查询 → undefined', name(findMember([NEW, COACH], '维护者(旧)')), undefined)
-check('带 (旧) 的查询不会漏到活跃记录上', name(findMember([NEW, COACH], '教练(旧)')), undefined)
+check('带 (旧) 的查询不会漏到活跃记录上', name(findMember([NEW, COACH], '示例甲(旧)')), undefined)
 
 console.log('\n【不匹配与空输入】')
 check('完全不存在 → undefined', name(findMember([COACH, NEW], '不存在的名字')), undefined)

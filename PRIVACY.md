@@ -120,7 +120,7 @@
 | `test/outbox-audit.mjs` | 同上 + `…/sent.jsonl` | 同上 |
 | `test/preflight.mjs` | `…/.dsh/profiles/web`、`…/.dsh/binary-star/control/shutdown` | 同上 |
 | `test/quoting-sample.txt` | 一个**工作项目**目录下的文件路径（含项目名与课程目录名） | 换成中性示例路径 |
-| `test/progress.test.mjs` | 同上那个工作项目的路径（写在**测试夹具字符串**里，形如 `X:\\…\\…`） | 换成中性示例路径 |
+| `test/progress.test.mjs` | 同上那个工作项目的路径（写在**测试夹具字符串**里，形如 `X:\\…\\…`） | 项目名与课程目录名已换成中性示例（`C:\\work\\proj\\…`、`D:\\a\\b\\…`）；**仍保留 `D:\\DSH`** —— 它是**产品名**、不含用户名或私人项目名，判为中性 |
 
 > ⚠️ **最后一次是我自己第二次漏掉的**（第一次扫用的是 `<项目目录>` 这个模式）：
 > 那个夹具里的路径是 **JS 字符串里的转义写法**（`D:\\DSH\\…`，两个反斜杠），

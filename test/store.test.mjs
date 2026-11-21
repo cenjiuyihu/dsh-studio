@@ -57,7 +57,7 @@ test('normalizeState：坏字段被丢弃，缺字段被补默认值', () => {
     version: 'nonsense',
     activeGroupId: '   ',
     members: {
-      'session-a': { sessionId: 'session-a', alias: '  教练成员  ', locked: 'yes', pinned: 1, order: 'x', caps: 'nope' },
+      'session-a': { sessionId: 'session-a', alias: '  示例甲  ', locked: 'yes', pinned: 1, order: 'x', caps: 'nope' },
       'session-b': null,
       '': { alias: 'no id' },
     },
@@ -65,7 +65,7 @@ test('normalizeState：坏字段被丢弃，缺字段被补默认值', () => {
   assert.equal(state.activeGroupId, DEFAULT_GROUP_ID)
   assert.deepEqual(Object.keys(state.members), ['session-a'])
   const member = state.members['session-a']
-  assert.equal(member.alias, '教练成员', 'alias 应被 trim')
+  assert.equal(member.alias, '示例甲', 'alias 应被 trim')
   assert.equal(member.locked, true, '非布尔 locked 回落到默认锁定')
   assert.equal(member.pinned, false, '非布尔 pinned 回落到 false')
   assert.equal(member.order, 0)
@@ -95,7 +95,7 @@ test('normalizeState：其它 group 原样保留（多群预留）', () => {
 
 test('memberUpsert：新建 vs 更新，且不改原状态对象', () => {
   const base = emptyState()
-  const created = memberUpsert(base, { sessionId: 'session-a', alias: '教练成员', color: 'blue' })
+  const created = memberUpsert(base, { sessionId: 'session-a', alias: '示例甲', color: 'blue' })
   assert.equal(created.created, true)
   assert.equal(created.member.locked, true)
   assert.deepEqual(Object.keys(base.members), [], '原状态不得被就地修改')
@@ -104,7 +104,7 @@ test('memberUpsert：新建 vs 更新，且不改原状态对象', () => {
   assert.equal(updated.created, false)
   assert.equal(updated.member.locked, false, 'locked 可被显式解锁')
   assert.deepEqual(updated.member.caps, ['模板生成'])
-  assert.equal(updated.member.alias, '教练成员', '未提供的字段保持不变')
+  assert.equal(updated.member.alias, '示例甲', '未提供的字段保持不变')
   assert.equal(updated.member.color, 'blue')
 })
 
@@ -155,7 +155,7 @@ test('StudioStore：落盘 → 重新读取 → 状态一致', () => {
     const store = new StudioStore(file)
     store.load()
     assert.equal(store.loadError, undefined, '文件不存在不应算错误')
-    store.upsert({ sessionId: 'session-a', alias: '教练成员', color: 'violet', caps: ['模板生成'] })
+    store.upsert({ sessionId: 'session-a', alias: '示例甲', color: 'violet', caps: ['模板生成'] })
     store.upsert({ sessionId: 'session-b', pinned: true })
 
     const reopened = new StudioStore(file)
@@ -163,7 +163,7 @@ test('StudioStore：落盘 → 重新读取 → 状态一致', () => {
     assert.equal(reopened.loadError, undefined)
     assert.equal(reopened.members().length, 2)
     const a = reopened.state.members['session-a']
-    assert.equal(a.alias, '教练成员')
+    assert.equal(a.alias, '示例甲')
     assert.equal(a.color, 'violet')
     assert.equal(a.locked, true)
     assert.deepEqual(a.caps, ['模板生成'])

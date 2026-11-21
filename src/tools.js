@@ -286,7 +286,7 @@ export function apply(ctx) {
       '用 `studio_members` 查对方的名字；`to` 填成员显示名或会话 id。' +
       '这是一条真实的、会被对方认真对待的请求，请像给人写消息一样写清楚你的诉求与期望的产出。',
     parameters: {
-      to: { type: 'string', required: true, description: '收件成员：显示名（如「教练成员」）或会话 id' },
+      to: { type: 'string', required: true, description: '收件成员：显示名（如「示例甲」）或会话 id' },
       text: { type: 'string', required: true, description: '消息正文' },
       kind: {
         // 可选参数 = **不写 `required` 键**。DSH 的入参 DSL 里 `required` 一旦出现就必须是 `true`，
@@ -365,7 +365,7 @@ export function apply(ctx) {
       const messageId = newGroupMessageId()
       const text = groupText(groupNameOf(store.state), kind, from, String(args.text), messageId)
       const agent = await ensureAgent(ctx, target.sessionId)
-      // ⚠️ 两个信号**语义不同**，都要报、且要分开报（成员「教练成员」指出 CLI 与原生工具
+      // ⚠️ 两个信号**语义不同**，都要报、且要分开报（成员「示例甲」指出 CLI 与原生工具
       //    口径不一致：CLI 用 `session.list.running`＝"正在跑一个回合"，
       //    这里原来用 `inbox.hasPending`＝"有待处理消息未消费"）。
       //    宿主侧两个都能读到，所以这里一起给；CLI 侧读不到 hasPending（没有读队列的 RPC），

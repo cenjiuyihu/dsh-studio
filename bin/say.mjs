@@ -9,9 +9,9 @@
 // 用法（任何会话里执行都可以）：
 //   node <此文件> --list                                   列出成员（含忙/闲）
 //   node <此文件> --inbox                                  看我收到了哪些群聊消息、回没回
-//   node <此文件> --to "教练成员" --text "帮我看一下这个模板"
-//   node <此文件> --to "站点成员" --kind ask --text-file C:\tmp\msg.md     ← 正文含引号/代码/JSON 时用这个
-//   node <此文件> --to "站点成员" --text -                      ← 从标准输入读正文
+//   node <此文件> --to "示例甲" --text "帮我看一下这个模板"
+//   node <此文件> --to "示例乙" --kind ask --text-file C:\tmp\msg.md     ← 正文含引号/代码/JSON 时用这个
+//   node <此文件> --to "示例乙" --text -                      ← 从标准输入读正文
 //
 // `--from` 省略时自动取 `$DSH_SESSION_ID`（当前会话），所以发送者身份**自动且正确**。
 //
@@ -102,7 +102,7 @@ function hasBodyArg(args) {
 /**
  * `--text` 的**门禁**：正文里含半角双引号时直接拒绝，并指路 `--text-file` / `--text -`。
  *
- * 为什么值得拦：成员「站点成员」**第四次**踩这个坑时自己反思——
+ * 为什么值得拦：成员「示例乙」**第四次**踩这个坑时自己反思——
  *   "我明明给自己做了『含双引号就拒绝发送』的门禁，却只在部分命令上用了它"。
  * 与其靠每个 agent 自己记得，不如让 CLI 统一拦：Windows 下 `--text "...\"...\"..."` 基本注定被
  * cmd/pwsh 撕开（我们实测过 `无法识别的参数：：4` 这类报错），拦住比让它带着残缺参数发出去安全得多。
@@ -476,7 +476,7 @@ function resolveTargets(members, query, selfSessionId) {  const parts = String(q
  * ⚠️ 关键区别：消息头 `｜#xxxxxx` 是**这条消息自己的 id**，而"它回复了谁"只写在
  * **正文首行的引用**里（`> 回复 #c592f5（来自 插件，…）：…`）。
  * 曾经把两者当成同一个东西（拿 header id 去匹配"我发出的 ask"），结果那段状态
- * **从来没有匹配上过** —— 站在成员「站点成员」的位置跑 `--inbox` 才发现：它那条 ask 明明
+ * **从来没有匹配上过** —— 站在成员「示例乙」的位置跑 `--inbox` 才发现：它那条 ask 明明
  * 已经被 ack 了，却一直显示"对方还没给回执"。
  */
 function quoteIdOf(body) {
@@ -515,13 +515,13 @@ function foldInbox(selfLabel, events) {
   // ★ 关于"回没回"：我用 CLI/工具发出的消息进入的是**对方**的会话，**我自己**的会话里没有记录 ——
   //   所以判定不在这里做（这里只能给出"我收到什么/我自己的会话里发过什么"），
   //   由 `--inbox` 汇总：本地发送账本 + 逐个成员会话扫描 + 本会话的出站消息。
-  //   （这个判定缺陷由成员「教练成员」与「站点成员」分别独立复现并报告。）
+  //   （这个判定缺陷由成员「示例甲」与「示例乙」分别独立复现并报告。）
   return { incoming, outgoing }
 }
 
 /** 本地时间戳（HH:MM:SS）。
  * 注意：以前用 toISOString() 输出的是 **UTC**，而成员在自己会话里看到的是本地时间，
- * 两边对不上会被当成两条不同的消息（成员「站点成员」报告）。现在统一成本地时间并显式标注。 */
+ * 两边对不上会被当成两条不同的消息（成员「示例乙」报告）。现在统一成本地时间并显式标注。 */
 function stamp(ms) {
   const date = new Date(ms)
   const pad = (value) => String(value).padStart(2, '0')
@@ -747,7 +747,7 @@ async function main() {
       // ⚠️ 口径必须写清：这里用的是 `session.list` 的 **running = 正在跑一个回合**，
       //   它**不等于**"队列里没有积压"。CLI 侧读不到队列深度（宿主没有暴露读队列的 RPC，
       //   只有浏览器能通过 `session/queue` 推帧看到），所以这里只说"运行中/空闲"，
-      //   不再用含糊的"忙/闲"——成员「教练成员」指出过这两者在别处被当成了同义词。
+      //   不再用含糊的"忙/闲"——成员「示例甲」指出过这两者在别处被当成了同义词。
       console.log(
         `- ${labelOf(member)}  #${shortId(member.sessionId)}  ${busy === true ? '🔴 运行中（消息会排队）' : busy === false ? '🟢 空闲' : '⚪ 状态未知'}` +
           `  ${member.role.length > 0 ? member.role : '（无角色）'}${member.caps.length > 0 ? `  [${member.caps.join(', ')}]` : ''}${member.locked ? '  🔒' : ''}`,
@@ -767,7 +767,7 @@ async function main() {
     //   ① 本地发送账本 sent.jsonl（最准：带 from/to/at，CLI 与原生工具都记）；
     //   ② 逐个成员扫他们的会话，找「来自我」的消息（兜底；账本是从本轮才开始记的）。
     // 为什么必须带 `to`：只用"之后有没有任意发出"会把"我给 A 回了"错记成"我给 B 也回了"。
-    // （成员「教练成员」指出这条判定必须按**同一发送者**算。）
+    // （成员「示例甲」指出这条判定必须按**同一发送者**算。）
     const sentEntries = readSentLog()
       .filter((entry) => entry !== null && typeof entry === 'object' && entry.from === selfLabel && typeof entry.at === 'string')
       .map((entry) => ({
@@ -807,7 +807,7 @@ async function main() {
           }
           // 这条是**群里的别人**发的。它落在某个成员会话里，说明它发给了那个成员（或广播）。
           // ★ `ref` 在**所有来源里统一表示"它在回复哪一条"**（= 正文引用行的短 id），
-          //   消息自己的 id 放 `selfId`。成员「教练成员」读源码指出过：这里原来写的是
+          //   消息自己的 id 放 `selfId`。成员「示例甲」读源码指出过：这里原来写的是
           //   `ref: parsed[4]`（自己的 id），于是 `filter(item.ref === ask.id)` 永远比不中，
           //   而兜底又要求 `ref === undefined`（每条都带 id，恒不成立）→ 那一段**恒报"还没回执"**。
           peerMessages.push({
@@ -825,7 +825,7 @@ async function main() {
     }
     // ★ 补一条**关键**来源：**别人回给我的消息落在"我自己"的会话里**（那正是 `foldInbox` 读的那份），
     //   而上面那个扫描循环只扫**其他成员**的会话 —— 于是"我发出的 ask 有没有被回"永远查不到。
-    //   实测抓到的现象：站在成员「站点成员」的位置跑 `--inbox`，它那条 ask（#364f13）
+    //   实测抓到的现象：站在成员「示例乙」的位置跑 `--inbox`，它那条 ask（#364f13）
     //   明明已经被回了（我回过 `#b0d2d6` 且带 `--reply-to 364f13`），却显示"对方还没给回执"。
     //   `ref` 在**所有 peer 来源里统一表示"它在回复哪一条"**（见上面那处注释与 `quoteIdOf`）。
     peerMessages.push(
@@ -854,7 +854,7 @@ async function main() {
     const { incoming, outgoing } = folded
     // 有证据才敢下"没回过"的结论；一条证据都没有时如实说"无法判定"，避免误导成员重发。
     const hasEvidence = sentEntries.length > 0 || outgoing.length > 0
-    // 表头**必须**带这句：底部那行提示在长输出里会被翻过去（成员「站点成员」实测时因为
+    // 表头**必须**带这句：底部那行提示在长输出里会被翻过去（成员「示例乙」实测时因为
     // `| Select-Object -First 16` 截断而没看到，一度以为短 id 没生效）。
     console.log(`我：${selfLabel}  (#${shortId(callerId)})    时间均为本地时间（${zoneLabel()}）    每条带 #短id，可 --reply-to 精确引用`)
     if (incoming.length === 0) {
@@ -868,7 +868,7 @@ async function main() {
     const knownLabels = new Set(members.map((member) => labelOf(member)))
     // 账本覆盖范围：只有"发出记录最早那条"之后收到的消息，才谈得上"我有没有回过"。
     // 更早的消息即便当时回过，也没有记录可查 —— 那种情况必须说 ⚪，不能猜 ⚠️。
-    // （成员「教练成员」第 (3) 条要求的同一条原则：没证据就别下结论。）
+    // （成员「示例甲」第 (3) 条要求的同一条原则：没证据就别下结论。）
     const coverageStart = sentEntries.length > 0 ? Math.min(...sentEntries.map((entry) => entry.at)) : Number.POSITIVE_INFINITY
     // 回执协议第 ② 层：正式回执（ack 接单 / decline 推掉）。deliver 也算把这条 ask 了结了。
     const RECEIPT_KINDS = ['ack', 'decline', 'deliver']
@@ -887,7 +887,7 @@ async function main() {
       const covered = Number.isFinite(coverageStart) && item.at >= coverageStart
       const gapSeconds = Number.isFinite(coverageStart) ? Math.max(1, Math.round((coverageStart - item.at) / 1000)) : 0
       // 判定规则抽在 src/protocol.js 的 `inboxVerdict`（纯函数、8 个分支都有单测）——
-      // 成员「教练成员」如实报告过 ⚪ 分支在真实会话里无法触发，所以不靠场景、靠单测覆盖。
+      // 成员「示例甲」如实报告过 ⚪ 分支在真实会话里无法触发，所以不靠场景、靠单测覆盖。
       const decided = inboxVerdict({
         kind: item.kind,
         isMember,
@@ -929,7 +929,7 @@ async function main() {
 
     // ── 我发出的 ask 走到哪了（委托方视角）────────────────────────────────
     // 为什么要有这一段：发起方最痛的不是"送到了没有"（第 ① 层已答），而是
-    // **"我批准之后它到底在不在做、做到哪一步"** —— 成员「站点成员」为此自己轮询 git status、
+    // **"我批准之后它到底在不在做、做到哪一步"** —— 成员「示例乙」为此自己轮询 git status、
     // 拿文件字节签名当进度、解压 transcript 判断是否还在写，还判断错过一次。
     // 这里把"它对这条 ask 回过什么"摆出来；没有就是没有，不猜。
     const myAsks = sentEntries
@@ -947,7 +947,7 @@ async function main() {
         // ⚠️ 不能简单取"最新一条"：实测里它选中了 19:54 那条**队列压力通告**（kind=say），
         //    而真正的回答是 19:42 的 deliver —— 于是显示成"回了一条（可能是别的上下文）"，
         //    把发起方误导成"它没答我的问题"。所以先按**像不像回答**筛，其次才看时间。
-        //    （成员「站点成员」在核对时正是拿 19:42 那条 deliver 当反例报上来的。）
+        //    （成员「示例乙」在核对时正是拿 19:42 那条 deliver 当反例报上来的。）
         const ANSWER_KINDS = ['ack', 'decline', 'progress', 'deliver']
         const looseAll = peerMessages
           .filter((item) => item.from === ask.to && item.at > ask.at && item.ref === undefined)
@@ -956,7 +956,7 @@ async function main() {
         const loose = looseAnswers.length > 0 ? looseAnswers : looseAll
         const last = referenced.length > 0 ? referenced[referenced.length - 1] : loose[loose.length - 1]
         if (last === undefined) {
-          // ★ 成员「站点成员」指出协议改动带来的新空白：删掉脚本式自动回执后，发起方从 CLI
+          // ★ 成员「示例乙」指出协议改动带来的新空白：删掉脚本式自动回执后，发起方从 CLI
           //   分不清"它没看到"和"它看到了不想接"。这里**能确定的说死、不能确定的说清**：
           //   投递成功是确定的（这条 ask 在账本里 = 宿主已受理），回执缺失也是确定的；
           //   缺的只有"它读没读"——那只有它自己能答。不猜。
@@ -1093,7 +1093,7 @@ async function main() {
   //   在动手前先被问一次 —— 它拦不住别人，但能让**这条通路上的每一个人**都受同一套约束。
   enforceSendRate({ storeFile, from: selfLabel, targets, kind, force: args.force === true })
 
-  // 投递回执带上目标当时的忙/闲 —— 委托方据此判断节奏（成员「教练成员」建议）。
+  // 投递回执带上目标当时的忙/闲 —— 委托方据此判断节奏（成员「示例甲」建议）。
   const runningMap = await fetchRunningMap(baseUrl)
   const results = []
   for (const target of targets) {
